@@ -16,6 +16,11 @@
     --radius:12px; --radius-sm:8px;
     --shadow:0 1px 2px rgba(0,0,0,.04),0 1px 8px rgba(0,0,0,.03);
   }
+  /* 2학기: 1학기(그린)와 확실히 구분되는 인디고/바이올렛 대비 테마 */
+  html[data-semester="2"]{
+    --accent:#5b53b0; --accent-soft:#e9e7f7; --accent-ink:#3a3480;
+    --bg:#f1f1f7; --surface-2:#f7f6fc; --line:#e2e1ee; --line-2:#cfcde2;
+  }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%}
   body{
@@ -168,37 +173,121 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/immer/9.0.21/immer.umd.production.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async></script>
 
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useMemo,useRef} = React;
 
-/* ---------- 저장소: localStorage 기반 영구 저장 ---------- */
-const DB_KEY = "eduapp_v1";
+/* ---------- 저장소: localStorage 기반 영구 저장 (학기별 분리) ---------- */
 const DB_VERSION = 12; // 학사일정(휴일·시험·행사) 반영
+const SEM_KEY = "eduapp_sem";
+function loadSem(){ try{ return localStorage.getItem(SEM_KEY)==="2" ? 2 : 1; }catch(e){ return 1; } }
+let ACTIVE_SEM = loadSem();
+function semSuffix(){ return ACTIVE_SEM===2 ? "_s2" : ""; } // 1학기는 기존 키 그대로(하위호환)
+function dbKey(){ return "eduapp_v1"+semSuffix(); }
+function applySemTheme(){ try{ document.documentElement.setAttribute("data-semester", String(ACTIVE_SEM)); }catch(e){} }
+function setActiveSem(s){ ACTIVE_SEM = (Number(s)===2)?2:1; try{ localStorage.setItem(SEM_KEY,String(ACTIVE_SEM)); }catch(e){} applySemTheme(); }
 function loadDB(){
-  try{ const r = localStorage.getItem(DB_KEY); if(r) return JSON.parse(r); }catch(e){}
+  try{ const r = localStorage.getItem(dbKey()); if(r) return JSON.parse(r); }catch(e){}
   return null;
 }
 function saveDB(db){
-  try{ localStorage.setItem(DB_KEY, JSON.stringify(db)); }catch(e){ console.warn("저장 실패",e); }
+  try{ localStorage.setItem(dbKey(), JSON.stringify(db)); }catch(e){ console.warn("저장 실패",e); }
+}
+// 2학기를 새로 시작할 때: 1학기의 학생 명단·시간표는 가져오고, 기록류는 비움
+function seedSemesterFresh(fromDb, carryRoster){
+  const base=seedDB();
+  if(carryRoster && fromDb){
+    const c=structuredClone(fromDb);
+    base.meta = c.meta || base.meta;
+    base.students = c.students || base.students;
+    base.classInfo = c.classInfo || base.classInfo;
+    base.periodTimes = c.periodTimes || base.periodTimes;
+    base.achievementBands = c.achievementBands || base.achievementBands;
+  }
+  // 기록류 초기화 (새 학기). 학사일정(cal)은 시드의 연간 일정을 그대로 사용.
+  base.attendance={}; base.exams=[]; base.prep={}; base.obs={}; base.overrides={}; base.worksheets={};
+  base.materials = (carryRoster && fromDb && fromDb.materials) ? structuredClone(fromDb.materials) : [];
+  base._v = DB_VERSION;
+  return base;
 }
 
 /* ===================== 클라우드 동기화 (구글 드라이브) ===================== */
 /* ▼▼▼ 설정: 아래 CLIENT_ID 한 줄만 본인 값으로 바꾸면 됩니다 (설정 안내는 별도 문서 참고) ▼▼▼ */
 const CLOUD = {
   CLIENT_ID: "307386070110-lbbabm09goo7ode2653r9iebbk4bern7.apps.googleusercontent.com",  // ← 구글 OAuth 클라이언트 ID 붙여넣기 (예: "1234567-abcd.apps.googleusercontent.com")
-  SCOPE: "https://www.googleapis.com/auth/drive.file", // 앱이 만든 파일만 접근(최소 권한)
+  SCOPE: "https://www.googleapis.com/auth/drive.file", // 앱이 만든 파일 + Picker로 직접 선택한 파일만 접근(최소 권한)
   FILE_NAME: "gyogwa_haksupgwalli_db.json",
+  API_KEY: "",  // ← (선택) 학습지 제출용 구글 Picker 사용 시 Cloud Console의 API 키를 붙여넣기 (없어도 CSV 가져오기는 동작)
 };
+// Picker가 drive.file 권한으로 선택 파일에 접근하려면 GCP 프로젝트 번호(appId)가 필요 → CLIENT_ID 앞부분에서 추출
+function gcpAppId(){ return (CLOUD.CLIENT_ID||"").split("-")[0]; }
+
+/* ---------- 구글 Picker 로더 + CSV 파서 (학습지 제출 연동용) ---------- */
+let _pickerLoading=null;
+function loadPicker(){
+  if(window.google && window.google.picker) return Promise.resolve();
+  if(_pickerLoading) return _pickerLoading;
+  _pickerLoading=new Promise((res,rej)=>{
+    const s=document.createElement("script"); s.src="https://apis.google.com/js/api.js";
+    s.onload=()=>{ window.gapi.load("picker",{callback:()=>res(), onerror:()=>rej(new Error("Picker 로드 실패"))}); };
+    s.onerror=()=>rej(new Error("Picker 스크립트 로드 실패"));
+    document.head.appendChild(s);
+  });
+  return _pickerLoading;
+}
+// 구글 시트 선택 → 선택된 문서({id,name}) 반환 (취소 시 null)
+function pickSpreadsheet(token){
+  return new Promise(async (res,rej)=>{
+    try{ await loadPicker(); }catch(e){ rej(e); return; }
+    try{
+      const view=new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS).setMode(google.picker.DocsViewMode.LIST);
+      const b=new google.picker.PickerBuilder()
+        .setOAuthToken(token)
+        .setAppId(gcpAppId())
+        .addView(view)
+        .setCallback(data=>{
+          if(data.action===google.picker.Action.PICKED){ res(data.docs&&data.docs[0]); }
+          else if(data.action===google.picker.Action.CANCEL){ res(null); }
+        });
+      if(CLOUD.API_KEY) b.setDeveloperKey(CLOUD.API_KEY);
+      b.build().setVisible(true);
+    }catch(e){ rej(e); }
+  });
+}
+// 선택한 시트를 CSV로 내보내 텍스트 반환 (drive.file: Picker로 고른 파일은 접근 가능)
+async function driveExportCsv(token, fileId){
+  const r=await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text/csv`,{headers:{Authorization:"Bearer "+token}});
+  if(!r.ok) throw new Error("시트 내보내기 실패("+r.status+")");
+  return await r.text();
+}
+// CSV 파서(따옴표·콤마·개행 처리)
+function parseCSV(text){
+  const rows=[]; let row=[], cell="", q=false;
+  for(let i=0;i<text.length;i++){ const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){ cell+='"'; i++; } else q=false; } else cell+=c; }
+    else { if(c==='"') q=true; else if(c===','){ row.push(cell); cell=""; } else if(c==='\n'){ row.push(cell); rows.push(row); row=[]; cell=""; } else if(c==='\r'){} else cell+=c; }
+  }
+  if(cell.length||row.length){ row.push(cell); rows.push(row); }
+  return rows.filter(r=>r.some(x=>x&&x.trim()!==""));
+}
+// 붙여넣기(탭 또는 콤마) 파서
+function parsePasted(text){
+  const lines=text.replace(/\r/g,"").split("\n").filter(l=>l.trim()!=="");
+  if(lines[0] && lines[0].indexOf("\t")>=0) return lines.map(l=>l.split("\t"));
+  return parseCSV(text);
+}
 /* ▲▲▲ 여기까지 ▲▲▲ */
-const BASE_KEY="eduapp_base_v1", FILEID_KEY="eduapp_driveFileId_v1";
+function baseKey(){ return "eduapp_base_v1"+semSuffix(); }
+function fileIdKey(){ return "eduapp_driveFileId_v1"+semSuffix(); }
+function driveFileName(){ return ACTIVE_SEM===2 ? "gyogwa_haksupgwalli_db_s2.json" : CLOUD.FILE_NAME; }
 const cloudCfgOk = ()=> !!CLOUD.CLIENT_ID;
 const httpsOk = ()=> location.protocol==="https:" || location.hostname==="localhost" || location.hostname==="127.0.0.1";
-function loadBase(){ try{ return JSON.parse(localStorage.getItem(BASE_KEY)||"null"); }catch(e){ return null; } }
-function saveBase(o){ try{ localStorage.setItem(BASE_KEY, JSON.stringify(o)); }catch(e){} }
-function getFileId(){ try{ return localStorage.getItem(FILEID_KEY)||null; }catch(e){ return null; } }
-function setFileId(id){ try{ id? localStorage.setItem(FILEID_KEY,id):localStorage.removeItem(FILEID_KEY); }catch(e){} }
+function loadBase(){ try{ return JSON.parse(localStorage.getItem(baseKey())||"null"); }catch(e){ return null; } }
+function saveBase(o){ try{ localStorage.setItem(baseKey(), JSON.stringify(o)); }catch(e){} }
+function getFileId(){ try{ return localStorage.getItem(fileIdKey())||null; }catch(e){ return null; } }
+function setFileId(id){ try{ id? localStorage.setItem(fileIdKey(),id):localStorage.removeItem(fileIdKey()); }catch(e){} }
 
 /* ----- 3-way 병합 엔진 (base=마지막 동기화 기준, local=내 기기, remote=클라우드) ----- */
 const ID_ARRAY_KEYS = { students:"id", exams:"id" }; // id 있는 배열은 id 기준 병합, 그 외 배열은 통째 3-way
@@ -246,13 +335,13 @@ function mergeDB(base,local,remote){
 
 /* ----- 구글 드라이브 REST ----- */
 async function driveFind(token){
-  const q=encodeURIComponent(`name='${CLOUD.FILE_NAME}' and trashed=false`);
+  const q=encodeURIComponent(`name='${driveFileName()}' and trashed=false`);
   const r=await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&fields=files(id,name,modifiedTime)`,{headers:{Authorization:"Bearer "+token}});
   if(!r.ok) throw new Error("목록 조회 실패("+r.status+")");
   const j=await r.json(); return (j.files&&j.files[0])? j.files[0].id : null;
 }
 async function driveCreate(token,obj){
-  const meta={name:CLOUD.FILE_NAME,mimeType:"application/json"};
+  const meta={name:driveFileName(),mimeType:"application/json"};
   const boundary="eduapp"+Date.now();
   const body=`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(obj)}\r\n--${boundary}--`;
   const r=await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
@@ -340,7 +429,7 @@ function useCloud(dbRef, applyMerged){
     clearTimeout(timerRef.current);
     timerRef.current=setTimeout(()=>doSync(false),2500);
   }
-  return {state,signIn,signOut,syncNow:()=>doSync(false),schedulePush};
+  return {state,signIn,signOut,syncNow:()=>doSync(false),schedulePush,getToken:(i)=>token(i)};
 }
 
 /* ---------- 실제 명단 (풍덕고 · 이명규 선생님) ---------- */
@@ -860,6 +949,21 @@ function classesOnDay(classInfo, dateStr){
   });
   return out.sort((a,b)=> a.period-b.period);
 }
+// 특정 날짜의 '실제' 수업 = 정규 시간표 + 날짜별 오버레이(보강/추가/변경/휴강) 병합
+function dayClasses(db, dateStr){
+  const dow = DOW[new Date(dateStr+"T00:00").getDay()];
+  const cal=db.cal||{};
+  const ev=cal[dateStr];
+  const offDay = ev && (ev.type==="off"||ev.type==="exam"); // 휴업·시험일엔 정규수업 없음(보강은 가능)
+  let out = offDay ? [] : classesOnDay(db.classInfo, dateStr).map(c=>({...c, override:null}));
+  const ov = (db.overrides && db.overrides[dateStr]) || [];
+  ov.forEach(o=>{
+    if(o.type==="휴강"){ out = out.filter(c=>!(c.period===o.period && (!o.cls||c.cls===o.cls))); }
+    else if(o.type==="변경"){ out = out.filter(c=>c.period!==o.period); out.push({grade:o.grade,cls:o.cls,subject:o.subject||"변경",period:o.period,dow,override:"변경"}); }
+    else { out.push({grade:o.grade,cls:o.cls,subject:o.subject||o.type,period:o.period,dow,override:o.type}); } // 보강·추가
+  });
+  return out.sort((a,b)=> a.period-b.period);
+}
 function gradeLabel(g){ return g+"학년"; }
 
 // 날짜 → 그 주 월요일
@@ -909,6 +1013,57 @@ function Toaster(){
   return <div className="toast">{msg}</div>;
 }
 const toast = m => toastFn && toastFn(m);
+
+/* ---------- 팝업(모달) 드래그 이동 훅 ---------- */
+function useDragModal(){
+  const [d,setD]=useState({x:0,y:0});
+  const ref=useRef({sx:0,sy:0,ox:0,oy:0});
+  function onDown(e){
+    if(e.target && e.target.closest && e.target.closest("button,input,select,textarea,a")) return; // 버튼·입력은 드래그 제외
+    if(e.pointerType==="mouse" && e.button!==0) return; // 왼쪽 버튼만
+    const r=ref.current; r.sx=e.clientX; r.sy=e.clientY; r.ox=d.x; r.oy=d.y;
+    const move=ev=>{ setD({x:r.ox+(ev.clientX-r.sx), y:r.oy+(ev.clientY-r.sy)}); };
+    const up=()=>{ window.removeEventListener("pointermove",move); window.removeEventListener("pointerup",up); };
+    window.addEventListener("pointermove",move); window.addEventListener("pointerup",up);
+  }
+  return { style:{transform:`translate(${d.x}px,${d.y}px)`}, onDown };
+}
+
+/* ---------- 학생 인덱스 · 출결 집계 유틸 (반복 filter/sort/집계 제거) ---------- */
+function studentSort(a,b){
+  const clsCmp=String(a.cls||"").localeCompare(String(b.cls||""),undefined,{numeric:true});
+  return clsCmp || (Number(a.no)||0)-(Number(b.no)||0) || String(a.name||"").localeCompare(String(b.name||""));
+}
+function buildStudentIndex(students){
+  const byClass={}, byGrade={}, classesByGrade={}, grades=new Set();
+  (students||[]).forEach(s=>{
+    if(!s) return;
+    grades.add(s.grade);
+    (byClass[s.cls]=byClass[s.cls]||[]).push(s);
+    (byGrade[s.grade]=byGrade[s.grade]||[]).push(s);
+    (classesByGrade[s.grade]=classesByGrade[s.grade]||new Set()).add(s.cls);
+  });
+  Object.values(byClass).forEach(l=>l.sort(studentSort));
+  Object.values(byGrade).forEach(l=>l.sort(studentSort));
+  const classLists={};
+  Object.keys(classesByGrade).forEach(g=>{ classLists[g]=[...classesByGrade[g]].sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true})); });
+  return { all:[...(students||[])].sort(studentSort), byClass, byGrade, classesByGrade:classLists, grades:[...grades].sort((a,b)=>Number(a)-Number(b)) };
+}
+// 명단 시그니처: 명단이 실제로 바뀔 때만 인덱스를 재계산(렌더 간 캐싱 유지)
+function rosterSig(students){ let s=((students||[]).length)+"|"; for(const x of (students||[])){ if(x) s+=x.id+":"+x.grade+":"+x.cls+":"+x.no+":"+x.name+";"; } return s; }
+function useStudentIndex(students){ const sig=rosterSig(students); return useMemo(()=>buildStudentIndex(students),[sig]); }
+function studentsIn(index, grade, cls="전체"){
+  if(cls && cls!=="전체") return (index.byClass[cls]||[]).filter(s=>grade==null || s.grade===grade);
+  if(grade!=null) return index.byGrade[grade]||[];
+  return index.all;
+}
+function attendanceSummary(students, rec){
+  let marked=0,present=0,late=0,absent=0,excused=0;
+  (students||[]).forEach(s=>{ const v=rec&&rec[s.id]; if(!v) return; marked++;
+    if(v==="present")present++; else if(v==="late")late++; else if(v==="absent")absent++; else if(v==="excused")excused++; });
+  return {total:(students||[]).length, marked, present, late, absent, excused};
+}
+function attendanceCounts(students, rec){ const su=attendanceSummary(students,rec); return ATT_STATES.map(st=>({...st,n:su[st.k]||0})); }
 
 /* ============================ APP ============================ */
 /* ---------- 클라우드 동기화 상태 표시 ---------- */
@@ -983,6 +1138,10 @@ function App(){
     // v8 미만: 시간표 구조/내용 갱신 (sched 배열화 + 실제 시간표 + 2-13 보정)
     if(loaded._v < 8){ loaded.classInfo = seed.classInfo; loaded.periodTimes = seed.periodTimes; }
     if(!loaded.prep) loaded.prep = {};
+    if(!loaded.overrides) loaded.overrides = {};   // 날짜별 보강·임시수업
+    if(!loaded.materials) loaded.materials = [];   // 수업자료 링크 라이브러리
+    if(!loaded.worksheets) loaded.worksheets = {}; // 학습지 제출(회차→학생→파일)
+    if(!loaded.worksheets) loaded.worksheets = [];  // 학습지 제출(구글폼 응답 매칭)
     if(!loaded.obs) loaded.obs = {};
     if(!loaded.formative) loaded.formative = seed.formative;
     if(!loaded.cal || loaded._v < 12) loaded.cal = seed.cal;
@@ -1000,16 +1159,54 @@ function App(){
   });
   const [view,setView]=useState("dashboard");
   const [navOpen,setNavOpen]=useState(false);
+  const [sem,setSem]=useState(ACTIVE_SEM);
   const [attTarget,setAttTarget]=useState(null); // 달력/시간표에서 특정 날짜·반 출결로 진입할 때
+  useEffect(()=>{ applySemTheme(); },[sem]);
 
   // 클라우드 동기화: db를 ref로 추적하고, 병합 결과를 안전하게 반영(동일하면 리렌더 생략 → 루프 방지)
   const dbRef=useRef(db); useEffect(()=>{ dbRef.current=db; },[db]);
   function applyMerged(merged){ setDb(prev=> JSON.stringify(prev)===JSON.stringify(merged)? prev : merged); }
   const cloud=useCloud(dbRef, applyMerged);
 
-  useEffect(()=>{ saveDB(db); cloud.schedulePush(); },[db]);
+  const saveTimer=useRef(null);
+  useEffect(()=>{
+    clearTimeout(saveTimer.current);
+    saveTimer.current=setTimeout(()=>saveDB(dbRef.current),500); // 타이핑 중 매번 전체 직렬화 방지
+    cloud.schedulePush();
+    return ()=>clearTimeout(saveTimer.current);
+  },[db]);
+  useEffect(()=>{
+    const flush=()=>saveDB(dbRef.current); // 탭 숨김·종료 시 즉시 저장
+    window.addEventListener("beforeunload",flush);
+    document.addEventListener("visibilitychange",flush);
+    return ()=>{ window.removeEventListener("beforeunload",flush); document.removeEventListener("visibilitychange",flush); };
+  },[]);
 
-  const update = fn => setDb(prev=>{ const next=structuredClone(prev); fn(next); return next; });
+  // 변경분만 새로 만드는 구조 공유 업데이트(Immer). 미로드 시 전체 깊은 복제로 폴백.
+  const update = fn => setDb(prev=>{
+    if(window.immer && window.immer.produce) return window.immer.produce(prev, fn);
+    const next=structuredClone(prev); fn(next); return next;
+  });
+
+  function switchSemester(target){
+    if(target===sem) return;
+    saveDB(db);                 // 현재 학기 데이터 확정 저장(현재 키)
+    setActiveSem(target);       // 키·드라이브 파일·테마 전환
+    let next=loadDB();          // 대상 학기 데이터 로드
+    if(!next){
+      if(target===2){
+        const carry=window.confirm("2학기를 새로 시작합니다.\n1학기의 학생 명단·시간표를 그대로 가져올까요?\n\n· 확인: 명단·시간표 가져오고 출결·평가 기록은 새로 시작\n· 취소: 완전히 빈 상태로 시작");
+        next=seedSemesterFresh(db, carry);
+      } else {
+        next=seedSemesterFresh(null, false);
+      }
+      saveDB(next);
+    }
+    setDb(next);
+    setSem(target);
+    setView("dashboard");
+    toast(target===2?"2학기로 전환했습니다":"1학기로 전환했습니다");
+  }
 
   const NAV=[
     {group:"개요",items:[
@@ -1051,8 +1248,16 @@ function App(){
       {navOpen && <div className="backdrop" onClick={()=>setNavOpen(false)}/>}
       <div className={"sidebar"+(navOpen?" open":"")}>
         <div className="brand">
-          <h1><span className="logo">교</span> 교과학습 관리</h1>
+          <h1><span className="logo">교</span> 교과학습 관리
+            <span style={{marginLeft:"auto",fontSize:11,fontWeight:700,padding:"2px 9px",borderRadius:20,background:"var(--accent-soft)",color:"var(--accent-ink)"}}>{sem}학기</span>
+          </h1>
           <p>{db.meta.subject? db.meta.subject : "고등학교 통합 관리 시스템"}</p>
+        </div>
+        <div style={{padding:"10px 14px",borderBottom:"1px solid var(--line)"}}>
+          <div className="seg" style={{width:"100%"}}>
+            <button className={sem===1?"on":""} style={{flex:1}} onClick={()=>switchSemester(1)}>1학기</button>
+            <button className={sem===2?"on":""} style={{flex:1}} onClick={()=>switchSemester(2)}>2학기</button>
+          </div>
         </div>
         <div className="nav">
           {NAV.map(g=>(
@@ -1096,7 +1301,7 @@ function App(){
           {view==="dev" && <Development db={db} update={update}/>}
           {view==="backup" && <BackupManager db={db} update={update}/>}
           {view==="prep" && <ClassPrep db={db} update={update} go={go}/>}
-          {view==="observe" && <Observe db={db} update={update}/>}
+          {view==="observe" && <Observe db={db} update={update} cloud={cloud}/>}
         </div>
       </div>
       <Toaster/>
@@ -1183,28 +1388,26 @@ const calNavStyle={width:24,height:24,borderRadius:6,border:"none",background:"r
 
 /* ---------- 달력 날짜 클릭 → 하루 보기 (수업정보 · 수업준비 · 출결현황) ---------- */
 function DayDetailModal({db,update,date,onClose,onAttendance}){
+  const drag=useDragModal();
   const cal=db.cal||{};
   const ev=cal[date];
   const off = ev && (ev.type==="off"||ev.type==="exam");
-  const classes = off? [] : classesOnDay(db.classInfo, date);
+  const classes = dayClasses(db, date);
   const dayAtt = db.attendance[date]||{};
+  const sIndex = useStudentIndex(db.students);
   const [prepCell,setPrepCell]=useState(null);
+  const [ovOpen,setOvOpen]=useState(false);
   const evTone = ev ? (ev.type==="off"?{bg:"#f6e3e0",c:"#a8392f",t:"휴업일"}
                       : ev.type==="exam"?{bg:"#f7ecd9",c:"#b5701a",t:"시험일"}
                       : {bg:"#eaf1f8",c:"#1d4e85",t:"행사"}) : null;
 
-  function summ(cls){
-    const studs=db.students.filter(s=>s.cls===cls);
-    let marked=0,p=0,l=0,a=0,e=0;
-    studs.forEach(s=>{ const v=dayAtt[s.id]; if(v){ marked++; if(v==="present")p++;else if(v==="late")l++;else if(v==="absent")a++;else if(v==="excused")e++; } });
-    return {total:studs.length, marked, present:p, late:l, absent:a, excused:e};
-  }
+  function summ(cls){ return attendanceSummary(sIndex.byClass[cls]||[], dayAtt); }
 
   return (
     <>
       <div className="modal-bg" onClick={onClose}>
-        <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth:580}}>
-          <div className="modal-h">
+        <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth:580,...drag.style}}>
+          <div className="modal-h" onPointerDown={drag.onDown} style={{cursor:"move",userSelect:"none"}}>
             <h3>{fmtDate(date)} · 하루 보기</h3>
             <button className="btn ghost sm" onClick={onClose}>✕</button>
           </div>
@@ -1225,7 +1428,7 @@ function DayDetailModal({db,update,date,onClose,onAttendance}){
                 {classes.map(c=>{
                   const k=prepKey(date,c.cls,c.period);
                   const prep=db.prep[k]||{};
-                  const hasPrep=prep.progress||prep.handout||prep.todo;
+                  const hasPrep=prep.progress||prep.handout||prep.todo||(prep.mats&&prep.mats.length);
                   const s=summ(c.cls);
                   const col=gradeColor(c.grade);
                   const done=s.total>0 && s.marked>=s.total;
@@ -1234,7 +1437,7 @@ function DayDetailModal({db,update,date,onClose,onAttendance}){
                       <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:8}}>
                         <span style={{width:28,height:28,borderRadius:7,background:"var(--accent-soft)",color:"var(--accent-ink)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:12}}>{c.period}</span>
                         <div style={{flex:1}}>
-                          <div style={{fontSize:14,fontWeight:700,color:col.ink,lineHeight:1.1}}>{gradeLabel(c.grade)} {c.cls}</div>
+                          <div style={{fontSize:14,fontWeight:700,color:col.ink,lineHeight:1.1}}>{gradeLabel(c.grade)} {c.cls}{c.override && <span className="pill" style={{fontSize:9.5,padding:"1px 7px",background:"var(--warn-soft)",color:"var(--warn)",marginLeft:6,verticalAlign:"middle"}}>{c.override}</span>}</div>
                           <div style={{fontSize:11,color:"var(--ink-3)"}}>{c.subject} · {c.period}교시 {db.periodTimes&&db.periodTimes[c.period]?`(${db.periodTimes[c.period]})`:""}</div>
                         </div>
                         {done ? <span className="pill green">완료</span>
@@ -1249,6 +1452,9 @@ function DayDetailModal({db,update,date,onClose,onAttendance}){
                             {prep.progress && <div><span style={{color:"var(--ink-3)"}}>📖</span> {prep.progress}</div>}
                             {prep.handout && <div><span style={{color:"var(--ink-3)"}}>📄</span> {prep.handout}</div>}
                             {prep.todo && <div style={{color:"var(--ink-2)"}}><span style={{color:"var(--ink-3)"}}>✓</span> {prep.todo}</div>}
+                            {prep.mats && prep.mats.map((m,mi)=>(
+                              <div key={mi}><span style={{color:"var(--ink-3)"}}>🔗</span> {m.url? <a href={m.url} target="_blank" rel="noopener noreferrer" style={{color:"var(--accent-ink)",fontWeight:600}}>{m.title||m.url}</a> : (m.title||"")}</div>
+                            ))}
                           </div>
                         ) : <span style={{color:"var(--ink-3)",fontSize:11.5}}>진도·학습지·할 일이 아직 없습니다</span>}
                       </div>
@@ -1275,13 +1481,15 @@ function DayDetailModal({db,update,date,onClose,onAttendance}){
               </div>
             )}
           </div>
-          <div className="modal-f">
+          <div className="modal-f" style={{justifyContent:"space-between"}}>
+            <button className="btn ghost sm" onClick={()=>setOvOpen(true)}>📌 보강·임시수업 추가</button>
             <button className="btn primary" onClick={onClose}>닫기</button>
           </div>
         </div>
       </div>
       {prepCell && <PrepEditor db={db} update={update} cell={prepCell} onClose={()=>setPrepCell(null)}
         onAttendance={onAttendance?(t)=>{ setPrepCell(null); onClose(); onAttendance(t); }:undefined}/>}
+      {ovOpen && <DateOverrideEditor db={db} update={update} init={{date}} onClose={()=>setOvOpen(false)}/>}
     </>
   );
 }
@@ -1297,18 +1505,14 @@ function Dashboard({db,go,update}){
   // 오늘 수업하는 반 (시간표 기반, 교시순). 단, 휴일·시험일이면 수업 없음.
   const todayCal = (db.cal||{})[today];
   const todayOff = todayCal && (todayCal.type==="off"||todayCal.type==="exam");
-  const todayClasses = todayOff? [] : classesOnDay(db.classInfo, today);
+  const todayClasses = dayClasses(db, today);
 
+  const sIndex=useStudentIndex(db.students);
   // 반별 오늘 출석 진행 현황
-  function classProgress(cls){
-    const studs = db.students.filter(s=>s.cls===cls);
-    let p=0,l=0,a=0,e=0,marked=0;
-    studs.forEach(s=>{ const v=todayAtt[s.id]; if(v){marked++; if(v==="present")p++;else if(v==="late")l++;else if(v==="absent")a++;else if(v==="excused")e++;} });
-    return {total:studs.length, marked, present:p, late:l, absent:a, excused:e};
-  }
+  function classProgress(cls){ return attendanceSummary(sIndex.byClass[cls]||[], todayAtt); }
 
   const fullDate = `${now.getFullYear()}년 ${now.getMonth()+1}월 ${now.getDate()}일 ${DOW[now.getDay()]}요일`;
-  const totalToday = todayClasses.reduce((sum,c)=> sum + db.students.filter(s=>s.cls===c.cls).length, 0);
+  const totalToday = todayClasses.reduce((sum,c)=> sum + (sIndex.byClass[c.cls]||[]).length, 0);
 
   return (
     <div className="grid" style={{gap:18}}>
@@ -1459,7 +1663,8 @@ function RoadStep({n,t,d,done}){
 
 /* ============================ STUDENTS ============================ */
 function Students({db,update}){
-  const grades=[...new Set(db.classInfo? db.classInfo.map(c=>c.grade): db.students.map(s=>s.grade))].sort();
+  const sIndex=useStudentIndex(db.students);
+  const grades=db.classInfo? [...new Set(db.classInfo.map(c=>c.grade))].sort((a,b)=>Number(a)-Number(b)) : sIndex.grades;
   const [filterGrade,setFilterGrade]=useState(grades[0]||1);
   const [filterCls,setFilterCls]=useState("전체");
   const [q,setQ]=useState("");
@@ -1470,13 +1675,10 @@ function Students({db,update}){
   const [photoTarget,setPhotoTarget]=useState(null);
 
   // 현재 학년의 반 목록
-  const classesInGrade=[...new Set(db.students.filter(s=>s.grade===filterGrade).map(s=>s.cls))];
+  const classesInGrade=sIndex.classesByGrade[filterGrade]||[];
 
-  const filtered=db.students
-    .filter(s=>s.grade===filterGrade)
-    .filter(s=>filterCls==="전체"||s.cls===filterCls)
-    .filter(s=>!q||s.name.includes(q)||(s.sid||"").includes(q))
-    .sort((a,b)=> a.cls===b.cls ? a.no-b.no : a.cls.localeCompare(b.cls,undefined,{numeric:true}));
+  const filtered=studentsIn(sIndex, filterGrade, filterCls)
+    .filter(s=>!q||s.name.includes(q)||(s.sid||"").includes(q));
 
   function removeStudent(id){
     if(!confirm("이 학생을 명단에서 삭제할까요? 관련 출석 기록도 함께 사라집니다.")) return;
@@ -1715,22 +1917,24 @@ function ImportModal({db,update,onClose}){
 
 /* ============================ ATTENDANCE ============================ */
 function Attendance({db,update,initial,onConsumed}){
-  const grades=[...new Set(db.students.map(s=>s.grade))].sort();
+  const sIndex=useStudentIndex(db.students);
+  const grades=sIndex.grades;
   const [date,setDate]=useState(todayStr());
   const [grade,setGrade]=useState(()=>{
     // 오늘 수업 있는 반의 학년을 기본 선택
-    const tc=classesOnDay(db.classInfo, todayStr());
+    const tc=dayClasses(db, todayStr());
     return tc[0]? tc[0].grade : (grades[0]||1);
   });
-  const classesInGrade=[...new Set(db.students.filter(s=>s.grade===grade).map(s=>s.cls))];
-  // 선택한 날짜에 시간표상 수업이 있는 반 집합
-  const classesToday=new Set(classesOnDay(db.classInfo, date).map(c=>c.cls));
+  const classesInGrade=sIndex.classesByGrade[grade]||[];
+  // 선택한 날짜에 수업이 있는 반(보강 포함) — 재계산 최소화
+  const dayCls=useMemo(()=>dayClasses(db, date),[db.classInfo,db.overrides,db.cal,date]);
+  const classesToday=useMemo(()=>new Set(dayCls.map(c=>c.cls)),[dayCls]);
   // 그날 수업 있는 반 중 현재 학년에 해당하는 것
   const openClassesInGrade=classesInGrade.filter(c=>classesToday.has(c));
-  // 그날 수업 있는 학년 집합
-  const gradesToday=new Set(classesOnDay(db.classInfo, date).map(c=>c.grade));
+  // 그날 수업 있는 학년 집합(보강 포함)
+  const gradesToday=useMemo(()=>new Set(dayCls.map(c=>c.grade)),[dayCls]);
   const [cls,setCls]=useState(()=>{
-    const tc=classesOnDay(db.classInfo, todayStr());
+    const tc=dayClasses(db, todayStr());
     return tc[0]? tc[0].cls : (classesInGrade[0]||"전체");
   });
   const [photos]=useState(()=>loadPhotos());
@@ -1752,10 +1956,7 @@ function Attendance({db,update,initial,onConsumed}){
     onConsumed && onConsumed();
   },[initial]);
 
-  const list=db.students
-    .filter(s=>s.grade===grade)
-    .filter(s=>cls==="전체"||s.cls===cls)
-    .sort((a,b)=> a.cls===b.cls? a.no-b.no : a.cls.localeCompare(b.cls,undefined,{numeric:true}));
+  const list=studentsIn(sIndex, grade, cls);
 
   function mark(sid,state){
     update(d=>{
@@ -1775,8 +1976,9 @@ function Attendance({db,update,initial,onConsumed}){
     toast(`나머지 ${rest.length}명을 출석 처리했습니다`);
   }
 
-  const counts=ATT_STATES.map(s=>({...s,n:list.filter(x=>dayRec[x.id]===s.k).length}));
-  const unmarked=list.filter(s=>!dayRec[s.id]).length;
+  const summary=attendanceSummary(list,dayRec);
+  const counts=ATT_STATES.map(st=>({...st,n:summary[st.k]||0}));
+  const unmarked=summary.total-summary.marked;
   const info0=db.classInfo&&db.classInfo.find(c=>c.cls===cls&&c.grade===grade);
 
   return (
@@ -1851,19 +2053,45 @@ function Attendance({db,update,initial,onConsumed}){
 
 /* ============================ ATT REPORT ============================ */
 function AttReport({db}){
-  const grades=[...new Set(db.students.map(s=>s.grade))].sort();
+  const sIndex=useStudentIndex(db.students);
+  const grades=sIndex.grades;
   const [grade,setGrade]=useState(grades[0]||1);
   const [cls,setCls]=useState("전체");
   const [range,setRange]=useState("all"); // all|month
   const [month,setMonth]=useState(todayStr().slice(0,7));
+  const [mode,setMode]=useState("cumulative"); // cumulative | byday
 
-  const classesInGrade=[...new Set(db.students.filter(s=>s.grade===grade).map(s=>s.cls))];
+  const classesInGrade=sIndex.classesByGrade[grade]||[];
   const dates=Object.keys(db.attendance).sort();
+
+  // ── 일자별 결석 조회용 ──────────────────────────────
+  const recordedDates=dates.filter(d=>Object.keys(db.attendance[d]||{}).length>0);
+  const [pickDate,setPickDate]=useState(recordedDates[recordedDates.length-1]||todayStr());
+  const dayRec=db.attendance[pickDate]||{};
+  // 그날 출석이 기록된 반(=수업한 반)만 추려 반별로 집계
+  const byClassMap={};
+  db.students.forEach(s=>{
+    const st=dayRec[s.id]; if(!st) return;
+    const key=s.grade+"-"+s.cls;
+    const g=byClassMap[key]||(byClassMap[key]={grade:s.grade,cls:s.cls,present:0,late:0,absent:0,excused:0,total:0,absentees:[],lates:[],excuseds:[]});
+    g[st]=(g[st]||0)+1; g.total++;
+    if(st==="absent") g.absentees.push(s);
+    else if(st==="late") g.lates.push(s);
+    else if(st==="excused") g.excuseds.push(s);
+  });
+  const byNo=(a,b)=>a.no-b.no;
+  const groups=Object.values(byClassMap)
+    .map(g=>({...g,absentees:g.absentees.sort(byNo),lates:g.lates.sort(byNo),excuseds:g.excuseds.sort(byNo)}))
+    .sort((a,b)=> a.grade-b.grade || a.cls.localeCompare(b.cls,undefined,{numeric:true}));
+  const withAbsence=groups.filter(g=>g.absentees.length>0);
+  const allPresentCls=groups.filter(g=>g.absentees.length===0);
+  const totalAbsent=groups.reduce((s,g)=>s+g.absent,0);
+  const totalLate=groups.reduce((s,g)=>s+g.late,0);
+  const totalExcused=groups.reduce((s,g)=>s+g.excused,0);
   const inRange = d => range==="all" ? true : d.startsWith(month);
   const useDates=dates.filter(inRange);
 
-  const students=db.students.filter(s=>s.grade===grade).filter(s=>cls==="전체"||s.cls===cls)
-    .sort((a,b)=> a.cls===b.cls? a.no-b.no : a.cls.localeCompare(b.cls,undefined,{numeric:true}));
+  const students=studentsIn(sIndex, grade, cls);
 
   const rows=students.map(s=>{
     const r={present:0,late:0,absent:0,excused:0,total:0};
@@ -1873,6 +2101,20 @@ function AttReport({db}){
   });
 
   function exportCSV(){
+    if(mode==="byday"){
+      const head=["일자","학년","반","번호","이름","학번","상태"];
+      const lines=[head.join(",")];
+      groups.forEach(g=>{
+        const emit=(arr,label)=>arr.forEach(s=>lines.push([pickDate,gradeLabel(s.grade),s.cls,s.no,s.name,s.sid||"",label].join(",")));
+        emit(g.absentees,"결석"); emit(g.lates,"지각"); emit(g.excuseds,"인정");
+      });
+      if(lines.length===1){ toast("해당 일자에 결석·지각·인정 기록이 없습니다"); return; }
+      const blob=new Blob(["\ufeff"+lines.join("\n")],{type:"text/csv;charset=utf-8"});
+      const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+      a.download=`출결현황_${pickDate}.csv`; a.click();
+      toast("CSV 파일을 내려받았습니다");
+      return;
+    }
     const head=["학년","반","번호","이름","학번","출석","지각","결석","인정","기록일수","출석률(%)"];
     const lines=[head.join(",")];
     rows.forEach(r=>lines.push([r.grade,r.cls,r.no,r.name,r.sid,r.present,r.late,r.absent,r.excused,r.total,r.rate==null?"":r.rate].join(",")));
@@ -1889,6 +2131,11 @@ function AttReport({db}){
       <div className="card">
         <div className="card-h" style={{gap:12,flexWrap:"wrap"}}>
           <div className="seg">
+            <button className={mode==="cumulative"?"on":""} onClick={()=>setMode("cumulative")}>누적 현황</button>
+            <button className={mode==="byday"?"on":""} onClick={()=>setMode("byday")}>일자별 결석</button>
+          </div>
+          {mode==="cumulative" && <>
+          <div className="seg">
             {grades.map(g=> <button key={g} className={grade===g?"on":""} onClick={()=>{setGrade(g);setCls("전체");}}>{gradeLabel(g)}</button>)}
           </div>
           <div className="seg">
@@ -1900,8 +2147,16 @@ function AttReport({db}){
             <button className={range==="month"?"on":""} onClick={()=>setRange("month")}>월별</button>
           </div>
           {range==="month" && <input type="month" value={month} onChange={e=>setMonth(e.target.value)} style={{width:150}}/>}
-          <button className="btn sm" style={{marginLeft:"auto"}} onClick={exportCSV} disabled={!hasData}>⬇ CSV 내보내기</button>
+          </>}
+          {mode==="byday" && (
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:13,fontWeight:600,color:"var(--ink-2)"}}>수업일</span>
+              <input type="date" value={pickDate} onChange={e=>setPickDate(e.target.value)} style={{width:160}}/>
+            </div>
+          )}
+          <button className="btn sm" style={{marginLeft:"auto"}} onClick={exportCSV} disabled={mode==="cumulative"?!hasData:groups.length===0}>⬇ CSV 내보내기</button>
         </div>
+        {mode==="cumulative" && <>
         <div className="card-pad" style={{paddingTop:14,paddingBottom:6}}>
           <span className="sub" style={{fontSize:12.5,color:"var(--ink-3)"}}>기록된 수업일: {useDates.length}일 {hasData && `(${useDates[0]} ~ ${useDates[useDates.length-1]})`}</span>
         </div>
@@ -1940,6 +2195,64 @@ function AttReport({db}){
           </table>
           )}
         </div>
+        </>}
+        {mode==="byday" && <>
+          <div className="card-pad" style={{paddingTop:14,paddingBottom:6}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <span style={{fontWeight:700,fontSize:14}}>{fmtDate(pickDate)}</span>
+              {groups.length>0 ? (<>
+                <span className="sub" style={{color:"var(--ink-3)"}}>수업한 반 {groups.length}개 · 총 결석 {totalAbsent}명</span>
+                <span className="pill red">결석 {totalAbsent}</span>
+                {totalLate>0 && <span className="pill warn">지각 {totalLate}</span>}
+                {totalExcused>0 && <span className="pill gray">인정 {totalExcused}</span>}
+              </>) : (
+                <span className="sub" style={{color:"var(--ink-3)"}}>기록된 출석 없음</span>
+              )}
+            </div>
+          </div>
+          {groups.length===0 ? (
+            <div className="empty"><div className="big">▤</div><p>해당 일자에 기록된 출석이 없습니다.<br/>다른 날짜를 선택하거나, 출석 체크 메뉴에서 먼저 기록을 남겨 주세요.</p></div>
+          ):(
+          <div className="card-pad" style={{paddingTop:4,display:"grid",gap:12}}>
+            {withAbsence.length===0 && (
+              <div style={{padding:"18px 14px",textAlign:"center",color:"var(--good)",fontWeight:600}}>✓ 수업한 모든 반이 전원 출석입니다.</div>
+            )}
+            {withAbsence.map(g=>(
+              <div key={g.grade+"-"+g.cls} style={{border:"1px solid var(--line)",borderRadius:"var(--radius-sm)",overflow:"hidden"}}>
+                <div style={{padding:"10px 14px",background:"var(--surface-2)",borderBottom:"1px solid var(--line)",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                  <span style={{fontWeight:700}}>{gradeLabel(g.grade)} {g.cls}</span>
+                  <span className="pill red">결석 {g.absent}</span>
+                  {g.late>0 && <span className="pill warn">지각 {g.late}</span>}
+                  {g.excused>0 && <span className="pill gray">인정 {g.excused}</span>}
+                  <span className="sub" style={{marginLeft:"auto",color:"var(--ink-3)"}}>출석 {g.present} / 기록 {g.total}명</span>
+                </div>
+                <div style={{padding:"8px 14px 12px"}}>
+                  {g.absentees.map(s=>(
+                    <div key={s.id} style={{display:"flex",alignItems:"center",gap:10,padding:"5px 0"}}>
+                      <span style={{width:42,color:"var(--ink-3)",fontSize:13}}>{s.no}번</span>
+                      <span style={{fontWeight:600}}>{s.name}</span>
+                      <span className="pill red" style={{marginLeft:4}}>결석</span>
+                      {s.sid && <span className="sub" style={{marginLeft:"auto",color:"var(--ink-3)"}}>{s.sid}</span>}
+                    </div>
+                  ))}
+                  {(g.lates.length>0||g.excuseds.length>0) && (
+                    <div style={{fontSize:12,color:"var(--ink-3)",marginTop:8,paddingTop:8,borderTop:"1px solid var(--line)",display:"flex",gap:16,flexWrap:"wrap"}}>
+                      {g.lates.length>0 && <span><b style={{color:"var(--warn)"}}>지각</b> · {g.lates.map(s=>s.name).join(", ")}</span>}
+                      {g.excuseds.length>0 && <span><b>인정</b> · {g.excuseds.map(s=>s.name).join(", ")}</span>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {allPresentCls.length>0 && (
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",paddingTop:2}}>
+                <span className="sub" style={{color:"var(--ink-3)"}}>전원 출석</span>
+                {allPresentCls.map(g=> <span key={g.grade+"-"+g.cls} className="pill green">{gradeLabel(g.grade)} {g.cls} ✓</span>)}
+              </div>
+            )}
+          </div>
+          )}
+        </>}
       </div>
     </div>
   );
@@ -2045,7 +2358,7 @@ function Exams({db,update}){
 
   function newExam(){
     const e={id:"ex"+Date.now(),title:"새 지필평가",date:todayStr(),scope:"전체",items:[{no:1,unit:"단원1",domain:"개념",pts:5,ans:""}],scores:{}};
-    update(d=>d.exams.push(e));
+    update(d=>{ d.exams.push(e); });
     setSelId(e.id); setEditExam(e.id); toast("새 평가를 만들었습니다");
   }
   function delExam(id){
@@ -2111,7 +2424,7 @@ function ScoreEntry({exam,db,update}){
   function setTotal(sid,val){
     update(d=>{
       const e=d.exams.find(x=>x.id===exam.id);
-      const v=val===""?null:Math.max(0,Math.min(max,Number(val)));
+      const v=val===""?null:Math.max(0,Math.min(max,Math.round(Number(val))));
       if(v==null){ delete e.scores[sid]; }
       else e.scores[sid]={mode:"total",total:v};
     });
@@ -2170,7 +2483,7 @@ function ScoreEntry({exam,db,update}){
                 <td style={{fontWeight:600}}>{s.name}</td>
                 <td>
                   {isItem ? <span style={{fontSize:12.5,color:"var(--ink-3)"}}>{score}점 <span style={{fontSize:11}}>(문항합산)</span></span>
-                  : <input type="number" min="0" max={max} value={sc?.total??""} onChange={e=>setTotal(s.id,e.target.value)} placeholder="–" style={{padding:"5px 8px",fontSize:13}}/>}
+                  : <input type="number" min="0" max={max} step="1" inputMode="numeric" value={sc?.total??""} onFocus={e=>{ const el=e.target; if((sc?.total??"")==="") setTotal(s.id,String(max)); requestAnimationFrame(()=>{try{el.select();}catch(_){}}); }} onChange={e=>setTotal(s.id,e.target.value)} placeholder="–" style={{padding:"5px 8px",fontSize:13}}/>}
                 </td>
                 <td>{g? <span className="pill" style={{background:g.color+"22",color:g.color}}>{g.grade} {pct}%</span> : <span style={{color:"var(--ink-3)",fontSize:12}}>–</span>}</td>
                 <td>
@@ -2941,8 +3254,8 @@ const OBS_ITEMS = [
   {key:"question",label:"질문",   full:"질문·피드백", ic:"🙋", color:"#a8651d"},
 ];
 
-function Observe({db,update}){
-  const [tab,setTab]=useState("input"); // input | report
+function Observe({db,update,cloud}){
+  const [tab,setTab]=useState("input"); // input | report | worksheet
   return (
     <div className="grid" style={{gap:16}}>
       <div className="card">
@@ -2950,11 +3263,13 @@ function Observe({db,update}){
           <div className="seg" style={{marginBottom:-1}}>
             <button className={tab==="input"?"on":""} onClick={()=>setTab("input")}>① 관찰 입력</button>
             <button className={tab==="report"?"on":""} onClick={()=>setTab("report")}>② 누적 조회</button>
+            <button className={tab==="worksheet"?"on":""} onClick={()=>setTab("worksheet")}>③ 학습지 제출</button>
           </div>
         </div>
       </div>
       {tab==="input" && <ObsInput db={db} update={update}/>}
       {tab==="report" && <ObsReport db={db}/>}
+      {tab==="worksheet" && <ObsWorksheets db={db} update={update} cloud={cloud}/>}
     </div>
   );
 }
@@ -3063,19 +3378,20 @@ function ObsReport({db}){
 
   const list=db.students.filter(s=>s.grade===grade && s.cls===cls).sort((a,b)=>a.no-b.no);
 
-  // 학생별 누적 집계
-  function tally(sid){
-    const res={colearn:0,present:0,question:0, days:[], memos:[]};
+  // 학생별 누적 집계: db.obs를 한 번만 순회해 인덱싱(학생마다 전체 순회하던 비효율 제거)
+  const obsByStu=useMemo(()=>{
+    const m={};
     Object.entries(db.obs).forEach(([k,o])=>{
-      const [d,sid2]=k.split("|");
-      if(sid2!==sid) return;
-      OBS_ITEMS.forEach(it=>{ if(o[it.key]) res[it.key]++; });
-      if(o.colearn||o.present||o.question||o.memo) res.days.push(d);
-      if(o.memo) res.memos.push({date:d,memo:o.memo});
+      const i=k.indexOf("|"); const d=k.slice(0,i), sid=k.slice(i+1);
+      const r=m[sid]||(m[sid]={colearn:0,present:0,question:0,days:[],memos:[]});
+      OBS_ITEMS.forEach(it=>{ if(o[it.key]) r[it.key]++; });
+      if(o.colearn||o.present||o.question||o.memo) r.days.push(d);
+      if(o.memo) r.memos.push({date:d,memo:o.memo});
     });
-    res.days.sort(); res.memos.sort((a,b)=>a.date.localeCompare(b.date));
-    return res;
-  }
+    Object.values(m).forEach(r=>{ r.days.sort(); r.memos.sort((a,b)=>a.date.localeCompare(b.date)); });
+    return m;
+  },[db.obs]);
+  function tally(sid){ return obsByStu[sid] || {colearn:0,present:0,question:0,days:[],memos:[]}; }
 
   const detail = detailStu? db.students.find(s=>s.id===detailStu) : null;
   const detailT = detail? tally(detail.id) : null;
@@ -3150,6 +3466,241 @@ function ObsReport({db}){
   );
 }
 
+/* ---------- ③ 학습지 제출 (구글폼 → 드라이브 → 학번·이름 매칭) ---------- */
+function driveIdFromUrl(u){ if(!u) return null; const m=String(u).match(/[-\w]{25,}/); return m?m[0]:null; }
+function dlLink(u){ const id=driveIdFromUrl(u); return id?`https://drive.google.com/uc?export=download&id=${id}`:u; }
+
+function ObsWorksheets({db,update,cloud}){
+  const ws=db.worksheets||{};
+  const rounds=Object.keys(ws);
+  const [round,setRound]=useState(rounds[0]||"");
+  const [newRound,setNewRound]=useState("");
+  const [importOpen,setImportOpen]=useState(false);
+  const grades=[...new Set(db.classInfo.map(c=>c.grade))].sort();
+  const [grade,setGrade]=useState(grades[0]||1);
+  const classesInGrade=db.classInfo.filter(c=>c.grade===grade).map(c=>c.cls);
+  const [cls,setCls]=useState(classesInGrade[0]||"");
+  useEffect(()=>{ if(!classesInGrade.includes(cls)) setCls(classesInGrade[0]||""); },[grade]);
+  useEffect(()=>{ if(round && !ws[round]) setRound(rounds[0]||""); },[Object.keys(ws).join(",")]);
+
+  const list=db.students.filter(s=>s.grade===grade && s.cls===cls).sort((a,b)=>a.no-b.no);
+  const subs=(round && ws[round])||{};
+  const submitted=list.filter(s=>subs[s.id]&&subs[s.id].files&&subs[s.id].files.length).length;
+
+  function addRound(){
+    const n=newRound.trim(); if(!n){ toast("회차 이름을 입력하세요"); return; }
+    if(ws[n]){ setRound(n); setNewRound(""); return; }
+    update(d=>{ d.worksheets=d.worksheets||{}; d.worksheets[n]=d.worksheets[n]||{}; });
+    setRound(n); setNewRound("");
+  }
+  function delRound(){
+    if(!round) return;
+    if(!confirm(`'${round}' 회차의 제출 기록을 삭제할까요?`)) return;
+    update(d=>{ if(d.worksheets) delete d.worksheets[round]; });
+    setRound("");
+  }
+  function setManual(sid,url){
+    update(d=>{
+      d.worksheets=d.worksheets||{}; d.worksheets[round]=d.worksheets[round]||{};
+      if(!url.trim()) delete d.worksheets[round][sid];
+      else d.worksheets[round][sid]={files:[url.trim()], at:todayStr(), src:"manual"};
+    });
+  }
+
+  return (
+    <div className="card">
+      <div className="card-h" style={{gap:10,flexWrap:"wrap"}}>
+        <h3>학습지 제출 현황</h3>
+        <select value={round} onChange={e=>setRound(e.target.value)} style={{width:"auto",minWidth:130,padding:"5px 9px",fontSize:13}}>
+          {rounds.length===0 && <option value="">회차 없음</option>}
+          {rounds.map(r=> <option key={r} value={r}>{r}</option>)}
+        </select>
+        <input value={newRound} onChange={e=>setNewRound(e.target.value)} placeholder="새 회차(예: 3회차)" style={{width:150,padding:"5px 9px",fontSize:13}}/>
+        <button className="btn sm" onClick={addRound}>＋ 회차</button>
+        {round && <button className="btn ghost danger sm" onClick={delRound}>회차 삭제</button>}
+        <button className="btn primary sm" style={{marginLeft:"auto"}} onClick={()=>{ if(!round){ toast("먼저 회차를 만들거나 선택하세요"); return; } setImportOpen(true); }}>📥 구글폼 응답 가져오기</button>
+      </div>
+      <div className="card-pad" style={{paddingTop:12,paddingBottom:4,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+        <div className="seg">{grades.map(g=> <button key={g} className={grade===g?"on":""} onClick={()=>setGrade(g)}>{gradeLabel(g)}</button>)}</div>
+        <div className="seg">{classesInGrade.map(c=> <button key={c} className={cls===c?"on":""} onClick={()=>setCls(c)}>{c}</button>)}</div>
+        {round && <span className="sub" style={{marginLeft:"auto"}}>제출 {submitted}/{list.length}명</span>}
+      </div>
+      {!round ? (
+        <div className="empty"><div className="big">🗂</div><p>회차를 만들고 <b>구글폼 응답 가져오기</b>로 학생 제출을 불러오세요.<br/>학번·이름으로 자동 매칭되어 제출 여부가 표시됩니다.</p></div>
+      ):(
+      <div className="scrollx">
+        <table>
+          <thead><tr>
+            <th style={{width:42}}>No</th><th style={{width:90}}>이름</th>
+            <th style={{width:80,textAlign:"center"}}>제출</th>
+            <th style={{width:160}}>파일</th>
+            <th style={{width:80}}>제출시각</th>
+            <th>직접 링크 첨부</th>
+          </tr></thead>
+          <tbody>
+            {list.map(s=>{
+              const sub=subs[s.id];
+              const has=sub&&sub.files&&sub.files.length;
+              return (
+                <tr key={s.id}>
+                  <td style={{color:"var(--ink-3)"}}>{s.no}</td>
+                  <td style={{fontWeight:600}}>{s.name}</td>
+                  <td style={{textAlign:"center"}}>{has? <span className="pill green">제출</span> : <span className="pill gray">미제출</span>}</td>
+                  <td>
+                    {has? sub.files.map((f,i)=>(
+                      <span key={i} style={{marginRight:8,whiteSpace:"nowrap"}}>
+                        <a href={f} target="_blank" rel="noopener noreferrer" style={{color:"var(--accent-ink)",fontWeight:600}}>보기</a>
+                        <a href={dlLink(f)} target="_blank" rel="noopener noreferrer" style={{color:"var(--ink-3)",marginLeft:6}}>⬇</a>
+                      </span>
+                    )) : <span style={{color:"var(--ink-3)",fontSize:12}}>–</span>}
+                  </td>
+                  <td style={{fontSize:12,color:"var(--ink-3)"}}>{has&&sub.at?String(sub.at).slice(5):"–"}</td>
+                  <td>
+                    <input defaultValue={has&&sub.src==="manual"?sub.files[0]:""} placeholder="드라이브 링크 붙여넣기" onBlur={e=>{ if(e.target.value.trim()) setManual(s.id,e.target.value); }} style={{padding:"4px 8px",fontSize:12,width:"100%",minWidth:180}}/>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      )}
+      {importOpen && <WorksheetImport db={db} update={update} cloud={cloud} round={round} onClose={()=>setImportOpen(false)}/>}
+    </div>
+  );
+}
+
+/* ---------- 구글폼 응답 → 학습지 제출 가져오기 (Picker + CSV 폴백) ---------- */
+function WorksheetImport({db,update,cloud,round,onClose}){
+  const drag=useDragModal();
+  const [rows,setRows]=useState(null);   // [[...],[...]] (1행=헤더)
+  const [paste,setPaste]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [err,setErr]=useState("");
+  const [map,setMap]=useState({sid:-1,name:-1,file:-1,time:-1});
+  const fileRef=useRef(null);
+
+  function guess(header){
+    const find=(...keys)=>header.findIndex(h=>{ const t=String(h||"").toLowerCase(); return keys.some(k=>t.includes(k)); });
+    const fileGuess=()=>{
+      let i=find("파일","업로드","사진","학습지","url","링크","file"); 
+      return i;
+    };
+    setMap({
+      sid: find("학번","번호","sid","id"),
+      name: find("이름","성명","name"),
+      file: fileGuess(),
+      time: find("타임스탬프","timestamp","시각","시간","제출"),
+    });
+  }
+  function useRows(r){
+    if(!r||r.length<2){ setErr("데이터가 충분하지 않습니다(머리글 + 1행 이상 필요)."); return; }
+    setErr(""); setRows(r); guess(r[0]);
+  }
+  async function viaPicker(){
+    setErr(""); setBusy(true);
+    try{
+      if(!cloud||!cloud.getToken) throw new Error("클라우드 로그인이 필요합니다.");
+      const tk=await cloud.getToken(true);
+      const doc=await pickSpreadsheet(tk);
+      if(!doc){ setBusy(false); return; } // 취소
+      const csv=await driveExportCsv(tk, doc.id);
+      useRows(parseCSV(csv));
+    }catch(e){ setErr("Picker/시트 읽기 실패: "+(e&&e.message||e)+" · 아래 CSV 붙여넣기로도 가져올 수 있습니다."); }
+    setBusy(false);
+  }
+  function viaPaste(){ try{ useRows(parsePasted(paste)); }catch(e){ setErr("붙여넣기 분석 실패: "+e.message); } }
+  function viaFile(e){
+    const f=e.target.files[0]; if(!f) return;
+    const rd=new FileReader(); rd.onload=ev=>{ try{ useRows(parseCSV(String(ev.target.result))); }catch(err){ setErr("CSV 분석 실패: "+err.message); } }; rd.readAsText(f);
+  }
+  function doImport(){
+    if(!rows){ return; }
+    if(map.sid<0 && map.name<0){ setErr("학번 또는 이름 열을 지정하세요."); return; }
+    if(map.file<0){ setErr("파일(링크) 열을 지정하세요."); return; }
+    let matched=0; const unmatched=[];
+    update(d=>{
+      d.worksheets=d.worksheets||{}; d.worksheets[round]=d.worksheets[round]||{};
+      for(let i=1;i<rows.length;i++){
+        const r=rows[i];
+        const sid=map.sid>=0? String(r[map.sid]||"").trim():"";
+        const nm =map.name>=0? String(r[map.name]||"").trim():"";
+        const fileCell=String(r[map.file]||"").trim();
+        const at=map.time>=0? String(r[map.time]||"").trim():"";
+        if(!fileCell) continue;
+        const files=fileCell.split(/[\s,;]+/).filter(x=>/^https?:\/\//.test(x));
+        if(files.length===0) continue;
+        let stu=null;
+        if(sid) stu=d.students.find(s=>String(s.sid)===sid);
+        if(!stu && nm) stu=d.students.find(s=>s.name===nm);
+        if(!stu){ unmatched.push(sid||nm||("행"+i)); continue; }
+        d.worksheets[round][stu.id]={files, at: at? at.slice(0,10):todayStr(), src:"form"};
+        matched++;
+      }
+    });
+    toast(`${matched}명 매칭 완료${unmatched.length?` · 미매칭 ${unmatched.length}명`:""}`);
+    if(unmatched.length) setErr("미매칭(학번/이름 확인 필요): "+unmatched.slice(0,15).join(", ")+(unmatched.length>15?" …":""));
+    else onClose();
+  }
+
+  const header=rows? rows[0]:[];
+  const colOpts=header.map((h,i)=> <option key={i} value={i}>{(h||("열"+(i+1)))+""}</option>);
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth:600,...drag.style}}>
+        <div className="modal-h" onPointerDown={drag.onDown} style={{cursor:"move",userSelect:"none"}}><h3>구글폼 응답 가져오기 · {round}</h3><button className="btn ghost sm" onClick={onClose}>✕</button></div>
+        <div className="modal-b">
+          <div className="helpbox" style={{marginBottom:14}}>
+            <span className="ic">ℹ</span>
+            <div>구글 폼(학번·이름·파일 업로드 문항)의 <b>응답 시트</b>를 가져옵니다. Picker로 시트를 직접 고르거나, 시트 내용을 복사해 붙여넣거나 CSV로 올리면 <b>학번·이름으로 자동 매칭</b>됩니다.</div>
+          </div>
+
+          {!rows && <>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+              <button className="btn primary" onClick={viaPicker} disabled={busy}>{busy?"여는 중…":"📂 구글 시트 선택 (Picker)"}</button>
+              <button className="btn" onClick={()=>fileRef.current.click()}>⬆ CSV 파일</button>
+              <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={viaFile} style={{display:"none"}}/>
+            </div>
+            <div className="field" style={{marginBottom:8}}><label className="fld">또는 시트 내용 붙여넣기 (머리글 포함, 탭/콤마 구분)</label>
+              <textarea rows={5} value={paste} onChange={e=>setPaste(e.target.value)} placeholder={"타임스탬프\t학번\t이름\t학습지 사진\n2026-06-19 09:10\t10801\t권소민\thttps://drive.google.com/..."}/></div>
+            <button className="btn" onClick={viaPaste} disabled={!paste.trim()}>붙여넣기 분석</button>
+          </>}
+
+          {rows && <>
+            <div style={{fontSize:12.5,color:"var(--ink-2)",marginBottom:10}}>응답 {rows.length-1}행 · 각 열의 역할을 지정하세요.</div>
+            <div className="row" style={{gap:10}}>
+              <div className="field" style={{flex:1}}><label className="fld">학번 열</label>
+                <select value={map.sid} onChange={e=>setMap({...map,sid:Number(e.target.value)})}><option value={-1}>(없음)</option>{colOpts}</select></div>
+              <div className="field" style={{flex:1}}><label className="fld">이름 열</label>
+                <select value={map.name} onChange={e=>setMap({...map,name:Number(e.target.value)})}><option value={-1}>(없음)</option>{colOpts}</select></div>
+            </div>
+            <div className="row" style={{gap:10}}>
+              <div className="field" style={{flex:1}}><label className="fld">파일(링크) 열</label>
+                <select value={map.file} onChange={e=>setMap({...map,file:Number(e.target.value)})}><option value={-1}>(없음)</option>{colOpts}</select></div>
+              <div className="field" style={{flex:1}}><label className="fld">제출시각 열(선택)</label>
+                <select value={map.time} onChange={e=>setMap({...map,time:Number(e.target.value)})}><option value={-1}>(없음)</option>{colOpts}</select></div>
+            </div>
+            <div style={{maxHeight:140,overflow:"auto",border:"1px solid var(--line)",borderRadius:8,padding:8,fontSize:11.5,color:"var(--ink-2)"}}>
+              {rows.slice(1,6).map((r,i)=>(<div key={i} style={{whiteSpace:"nowrap"}}>{[map.sid,map.name,map.file].filter(x=>x>=0).map(ci=>r[ci]).join(" · ")}</div>))}
+              {rows.length>6 && <div style={{color:"var(--ink-3)"}}>… 외 {rows.length-6}행</div>}
+            </div>
+          </>}
+
+          {err && <p style={{marginTop:12,fontSize:12.5,color:"var(--danger)"}}>{err}</p>}
+        </div>
+        <div className="modal-f" style={{justifyContent:"space-between"}}>
+          {rows? <button className="btn ghost" onClick={()=>{setRows(null);setErr("");}}>← 다시 선택</button> : <span/>}
+          <div style={{display:"flex",gap:8}}>
+            <button className="btn" onClick={onClose}>닫기</button>
+            {rows && <button className="btn primary" onClick={doImport}>가져오기</button>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ============================ 수업 준비 ============================ */
 const DOW_KR = ["월","화","수","목","금"];
 // 학년별 색상 (1·2학년 구분)
@@ -3179,6 +3730,9 @@ function WeekTimetable({db, weekMon, onCellClick, ttEdit, compact}){
   const TODAY_SHADE="rgba(74,124,89,0.06)"; // 옅은 초록 음영 (오늘 열)
   // 행사 라벨이 하나라도 있으면 라벨 행 표시
   const hasAnyLabel = weekDates.some(d=>cal[d]);
+  // 날짜별 실제 수업(정규+보강/변경/휴강) 교시별 인덱스
+  const dayClassMap={};
+  weekDates.forEach(d=>{ const m={}; dayClasses(db,d).forEach(c=>{ (m[c.period]=m[c.period]||[]).push(c); }); dayClassMap[d]=m; });
 
   return (
     <div className="scrollx">
@@ -3218,27 +3772,29 @@ function WeekTimetable({db, weekMon, onCellClick, ttEdit, compact}){
                 const date=weekDates[di];
                 const isToday=date===todayD;
                 const ev=cal[date];
-                const noClass = ev && (ev.type==="off"||ev.type==="exam"); // 휴일·시험엔 수업 미표시
-                const cs=noClass? [] : classAt(dow,period);
+                const noClass = ev && (ev.type==="off"||ev.type==="exam"); // 휴일·시험엔 정규수업 미표시
+                const cs=(dayClassMap[date]&&dayClassMap[date][period])||[];
                 return (
                   <td key={dow} style={{padding:4,background:isToday?TODAY_SHADE:"",verticalAlign:"top"}}>
                     {noClass && period===1 && (
                       <div style={{fontSize:10.5,color:"var(--ink-3)",textAlign:"center",padding:"6px 2px"}}>{ev.type==="exam"?"시험":"휴업"}</div>
                     )}
-                    {cs.map(c=>{
+                    {cs.map((c,ci)=>{
                       const k=prepKey(date,c.cls,period);
                       const prep=db.prep[k];
-                      const hasPrep=prep && (prep.progress||prep.handout||prep.todo);
+                      const hasPrep=prep && (prep.progress||prep.handout||prep.todo||(prep.mats&&prep.mats.length));
                       const col=gradeColor(c.grade);
+                      const ovStyle = c.override ? {borderLeft:`4px dashed var(--warn)`} : {borderLeft:`4px solid ${col.bar}`};
                       if(ttEdit){
-                        return <div key={c.cls} className="tt-cell" style={{background:col.bg,borderLeft:`4px solid ${col.bar}`}}>
+                        return <div key={c.cls+"_"+ci} className="tt-cell" style={{background:col.bg,...ovStyle}}>
                           <b style={{fontSize:15,color:col.ink}}>{c.grade}-{c.cls.replace("반","")}</b> <span style={{fontSize:11,color:"var(--ink-3)"}}>{c.subject}</span>
+                          {c.override && <span className="pill" style={{fontSize:9,padding:"0 6px",background:"var(--warn-soft)",color:"var(--warn)",marginLeft:4}}>{c.override}</span>}
                         </div>;
                       }
                       return (
-                        <div key={c.cls} className="tt-cell" onClick={()=>onCellClick&&onCellClick({date,cls:c.cls,period,dow,subject:c.subject,grade:c.grade})}
-                          style={{cursor:onCellClick?"pointer":"default",borderLeft:`4px solid ${col.bar}`,background:hasPrep?col.bg:"var(--surface)"}}>
-                          <div style={{fontWeight:800,fontSize:17,lineHeight:1.15,color:col.ink}}>{c.grade}-{c.cls.replace("반","")}</div>
+                        <div key={c.cls+"_"+ci} className="tt-cell" onClick={()=>onCellClick&&onCellClick({date,cls:c.cls,period,dow,subject:c.subject,grade:c.grade})}
+                          style={{cursor:onCellClick?"pointer":"default",...ovStyle,background:hasPrep?col.bg:"var(--surface)"}}>
+                          <div style={{fontWeight:800,fontSize:17,lineHeight:1.15,color:col.ink}}>{c.grade}-{c.cls.replace("반","")}{c.override && <span className="pill" style={{fontSize:9,padding:"0 6px",background:"var(--warn-soft)",color:"var(--warn)",marginLeft:5,verticalAlign:"middle"}}>{c.override}</span>}</div>
                           <div style={{fontSize:10.5,color:"var(--ink-3)",marginTop:1}}>{c.subject}</div>
                           {!compact && prep && prep.progress && <div style={{fontSize:10.5,color:col.ink,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>📖 {prep.progress}</div>}
                           {!compact && hasPrep && (prep.handout||prep.todo) && <div style={{fontSize:9.5,color:"var(--ink-3)",marginTop:1}}>{prep.handout?"📄 ":""}{prep.todo?"✓":""}</div>}
@@ -3263,6 +3819,7 @@ function ClassPrep({db,update,go}){
   const [editCell,setEditCell]=useState(null); // {date,cls,period,dow,subject}
   const [ttEdit,setTtEdit]=useState(false);
   const [calOpen,setCalOpen]=useState(false);
+  const [ovOpen,setOvOpen]=useState(false);
 
   return (
     <div className="grid" style={{gap:16}}>
@@ -3275,6 +3832,7 @@ function ClassPrep({db,update,go}){
             <button className="btn ghost sm" onClick={()=>setWeekMon(addDays(weekMon,7))}>다음주 →</button>
             <span style={{fontSize:13,fontWeight:600,color:"var(--ink-2)",marginLeft:8}}>{fmtMD(weekMon)} ~ {fmtMD(addDays(weekMon,4))}</span>
             <button className="btn ghost sm" style={{marginLeft:8}} onClick={()=>setCalOpen(true)}>📅 학사일정</button>
+            <button className="btn ghost sm" onClick={()=>setOvOpen(true)}>📌 보강·임시</button>
             <button className={"btn sm"+(ttEdit?" primary":" ghost")} onClick={()=>setTtEdit(v=>!v)}>{ttEdit?"수정 완료":"⚙ 시간표 수정"}</button>
           </div>
         </div>
@@ -3287,6 +3845,7 @@ function ClassPrep({db,update,go}){
       {editCell && !editCell.addMode && !ttEdit && <PrepEditor db={db} update={update} cell={editCell} onClose={()=>setEditCell(null)} onAttendance={go?(t)=>{ setEditCell(null); go("attendance",t); }:undefined}/>}
       {editCell && (editCell.addMode||ttEdit) && <TimetableEditor db={db} update={update} cell={editCell} onClose={()=>setEditCell(null)}/>}
       {calOpen && <CalendarEditor db={db} update={update} weekMon={weekMon} onClose={()=>setCalOpen(false)}/>}
+      {ovOpen && <DateOverrideEditor db={db} update={update} init={{date:todayStr()}} onClose={()=>setOvOpen(false)}/>}
     </div>
   );
 }
@@ -3360,22 +3919,43 @@ function CalendarEditor({db,update,weekMon,onClose}){
 
 /* ---------- 수업 준비 입력 (진도/학습지/할일) ---------- */
 function PrepEditor({db,update,cell,onClose,onAttendance}){
+  const drag=useDragModal();
   const k=prepKey(cell.date,cell.cls,cell.period);
   const cur=db.prep[k]||{progress:"",handout:"",todo:""};
   const [progress,setProgress]=useState(cur.progress||"");
   const [handout,setHandout]=useState(cur.handout||"");
   const [todo,setTodo]=useState(cur.todo||"");
+  const [mats,setMats]=useState(cur.mats||[]); // [{title,url,memo}]
+  const [nt,setNt]=useState(""), [nu,setNu]=useState(""), [nm,setNm]=useState("");
+  const [libOpen,setLibOpen]=useState(false);
+  const library=db.materials||[];
+  function addMat(){
+    const t=nt.trim(), u=nu.trim();
+    if(!t && !u){ toast("자료명 또는 링크를 입력하세요"); return; }
+    setMats([...mats,{title:t,url:u,memo:nm.trim()}]);
+    setNt(""); setNu(""); setNm("");
+  }
+  function removeMat(i){ setMats(mats.filter((_,idx)=>idx!==i)); }
+  function pickFromLib(m){ setMats([...mats,{title:m.title,url:m.url,memo:m.memo||""}]); setLibOpen(false); toast("자료를 불러왔습니다"); }
   function save(){
     update(d=>{
-      if(!progress && !handout && !todo){ delete d.prep[k]; }
-      else d.prep[k]={progress,handout,todo};
+      const empty=!progress && !handout && !todo && (!mats||mats.length===0);
+      if(empty){ delete d.prep[k]; }
+      else d.prep[k]={progress,handout,todo,mats};
+      // 자료 라이브러리 갱신(자료명+링크 기준 중복 제거 → 다른 차시에서 불러오기 가능)
+      d.materials=d.materials||[];
+      (mats||[]).forEach(m=>{
+        if(!m.title && !m.url) return;
+        if(!d.materials.some(x=>x.title===m.title && x.url===m.url))
+          d.materials.push({title:m.title,url:m.url,memo:m.memo||"",subject:cell.subject||"",at:todayStr()});
+      });
     });
     toast("저장했습니다"); onClose();
   }
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth:480}}>
-        <div className="modal-h"><h3>{cell.grade}-{cell.cls.replace("반","")} · {cell.dow} {cell.period}교시</h3><button className="btn ghost sm" onClick={onClose}>✕</button></div>
+      <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth:480,...drag.style}}>
+        <div className="modal-h" onPointerDown={drag.onDown} style={{cursor:"move",userSelect:"none"}}><h3>{cell.grade}-{cell.cls.replace("반","")} · {cell.dow} {cell.period}교시</h3><button className="btn ghost sm" onClick={onClose}>✕</button></div>
         <div className="modal-b">
           <div className="helpbox" style={{marginBottom:14}}>
             <span className="ic">📅</span>
@@ -3387,10 +3967,54 @@ function PrepEditor({db,update,cell,onClose,onAttendance}){
             <input value={handout} onChange={e=>setHandout(e.target.value)} placeholder="예: 포트폴리오 학습지 5회차 배부"/></div>
           <div className="field" style={{marginBottom:0}}><label className="fld">✓ 할 일 / 메모</label>
             <textarea rows={3} value={todo} onChange={e=>setTodo(e.target.value)} placeholder="예: 지난 시간 결석생 보충, 수행평가 안내"/></div>
+
+          <div style={{marginTop:16,paddingTop:14,borderTop:"1px solid var(--line)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <label className="fld" style={{marginBottom:0}}>🔗 수업자료 (링크)</label>
+              <button className="btn ghost sm" style={{marginLeft:"auto"}} onClick={()=>setLibOpen(o=>!o)}>📂 자료 불러오기{library.length?` (${library.length})`:""}</button>
+            </div>
+
+            {libOpen && (
+              <div style={{border:"1px solid var(--line)",borderRadius:8,padding:"8px 10px",marginBottom:10,maxHeight:160,overflowY:"auto",background:"var(--surface-2)"}}>
+                {library.length===0 ? <div style={{fontSize:12,color:"var(--ink-3)"}}>저장된 자료가 없습니다. 아래에서 자료를 추가해 저장하면 다음 차시에서 불러올 수 있습니다.</div>
+                : library.slice().reverse().map((m,i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12.5,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.title||m.url}</div>
+                      {m.subject && <div style={{fontSize:10.5,color:"var(--ink-3)"}}>{m.subject}</div>}
+                    </div>
+                    <button className="btn ghost sm" onClick={()=>pickFromLib(m)}>＋ 추가</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {mats.length>0 && <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
+              {mats.map((m,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 9px",border:"1px solid var(--line)",borderRadius:8}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    {m.url ? <a href={m.url} target="_blank" rel="noopener noreferrer" style={{fontSize:13,fontWeight:600,color:"var(--accent-ink)",wordBreak:"break-all"}}>{m.title||m.url}</a>
+                          : <span style={{fontSize:13,fontWeight:600}}>{m.title}</span>}
+                    {m.memo && <div style={{fontSize:11,color:"var(--ink-3)"}}>{m.memo}</div>}
+                  </div>
+                  <button className="btn ghost danger sm" onClick={()=>removeMat(i)}>✕</button>
+                </div>
+              ))}
+            </div>}
+
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              <input value={nt} onChange={e=>setNt(e.target.value)} placeholder="자료명 (예: 이차함수 학습지 PDF)"/>
+              <input value={nu} onChange={e=>setNu(e.target.value)} placeholder="링크 URL (예: 구글 드라이브 공유 링크)"/>
+              <div style={{display:"flex",gap:6}}>
+                <input value={nm} onChange={e=>setNm(e.target.value)} placeholder="메모 (선택)" style={{flex:1}}/>
+                <button className="btn" onClick={addMat} style={{whiteSpace:"nowrap"}}>＋ 자료 추가</button>
+              </div>
+            </div>
+          </div>
         </div>
         <div className="modal-f" style={{justifyContent:"space-between"}}>
           <div style={{display:"flex",gap:8}}>
-            {db.prep[k] && <button className="btn ghost danger" onClick={()=>{ update(d=>delete d.prep[k]); toast("삭제했습니다"); onClose(); }}>삭제</button>}
+            {db.prep[k] && <button className="btn ghost danger" onClick={()=>{ update(d=>{ delete d.prep[k]; }); toast("삭제했습니다"); onClose(); }}>삭제</button>}
             {onAttendance && cell.cls && <button className="btn ghost" onClick={()=>{ onClose(); onAttendance({date:cell.date, grade:cell.grade, cls:cell.cls}); }}>✓ 출결</button>}
           </div>
           <div style={{display:"flex",gap:8}}>
@@ -3456,6 +4080,67 @@ function TimetableEditor({db,update,cell,onClose}){
           <button className="btn" onClick={onClose}>취소</button>
           <button className="btn primary" onClick={addClass}>이 위치로 추가</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+/* ---------- 날짜별 보강·임시수업 (정규 시간표와 별개, 그 날짜에만 적용) ---------- */
+function DateOverrideEditor({db,update,init,onClose}){
+  const drag=useDragModal();
+  const classInfo=db.classInfo;
+  const [date,setDate]=useState((init&&init.date)||todayStr());
+  const [type,setType]=useState("보강");
+  const [selCls,setSelCls]=useState(classInfo[0]?classInfo[0].cls:"");
+  const [period,setPeriod]=useState((init&&init.period)||1);
+  const [note,setNote]=useState("");
+  const list=(db.overrides&&db.overrides[date])||[];
+  function add(){
+    update(d=>{
+      d.overrides=d.overrides||{};
+      d.overrides[date]=d.overrides[date]||[];
+      const ci=d.classInfo.find(c=>c.cls===selCls)||{};
+      d.overrides[date].push({type, cls:selCls, grade:ci.grade, subject: type==="휴강"?"":(ci.subject||""), period:Number(period), note:note.trim()});
+    });
+    toast(`${date} ${period}교시 ${selCls} ${type}`); setNote("");
+  }
+  function remove(i){
+    update(d=>{ if(d.overrides&&d.overrides[date]){ d.overrides[date].splice(i,1); if(d.overrides[date].length===0) delete d.overrides[date]; } });
+  }
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth:500,...drag.style}}>
+        <div className="modal-h" onPointerDown={drag.onDown} style={{cursor:"move",userSelect:"none"}}><h3>보강 · 임시수업 관리</h3><button className="btn ghost sm" onClick={onClose}>✕</button></div>
+        <div className="modal-b">
+          <div className="helpbox" style={{marginBottom:14}}><span className="ic">📌</span>
+            <div>특정 <b>날짜에만</b> 적용됩니다. <b>보강·추가</b>는 그날 출석 체크 대상에 포함되고, <b>변경</b>은 같은 교시 정규수업을 대체, <b>휴강</b>은 그날 정규수업을 제외합니다.</div></div>
+          <div className="row">
+            <div className="field" style={{flex:1.3,marginBottom:10}}><label className="fld">날짜</label><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
+            <div className="field" style={{flex:1,marginBottom:10}}><label className="fld">유형</label>
+              <select value={type} onChange={e=>setType(e.target.value)}><option>보강</option><option>추가</option><option>변경</option><option>휴강</option></select></div>
+          </div>
+          <div className="row">
+            <div className="field" style={{flex:1.5,marginBottom:10}}><label className="fld">반</label>
+              <select value={selCls} onChange={e=>setSelCls(e.target.value)}>{classInfo.map(c=> <option key={c.cls} value={c.cls}>{c.grade}-{c.cls.replace("반","")} ({c.subject})</option>)}</select></div>
+            <div className="field" style={{flex:1,marginBottom:10}}><label className="fld">교시</label>
+              <select value={period} onChange={e=>setPeriod(Number(e.target.value))}>{[1,2,3,4,5,6,7].map(p=> <option key={p} value={p}>{p}교시</option>)}</select></div>
+          </div>
+          <div className="field"><label className="fld">메모 (선택)</label><input value={note} onChange={e=>setNote(e.target.value)} placeholder="예: 현장체험학습 결손 보강"/></div>
+          <button className="btn primary" style={{width:"100%"}} onClick={add}>＋ 추가</button>
+          {list.length>0 && <div style={{marginTop:16}}>
+            <div className="fld" style={{marginBottom:6}}>{fmtDate(date)} 등록된 임시수업</div>
+            {list.map((o,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid var(--line)"}}>
+                <span className="pill" style={{background:"var(--warn-soft)",color:"var(--warn)"}}>{o.type}</span>
+                <span style={{fontWeight:600}}>{o.grade}-{String(o.cls).replace("반","")}</span>
+                <span style={{color:"var(--ink-3)",fontSize:12}}>{o.period}교시{o.subject?` · ${o.subject}`:""}{o.note?` · ${o.note}`:""}</span>
+                <button className="btn ghost danger sm" style={{marginLeft:"auto"}} onClick={()=>remove(i)}>삭제</button>
+              </div>
+            ))}
+          </div>}
+        </div>
+        <div className="modal-f"><button className="btn primary" onClick={onClose}>닫기</button></div>
       </div>
     </div>
   );
@@ -4894,8 +5579,8 @@ function BackupManager({db,update}){
       try{
         const data=JSON.parse(ev.target.result);
         if(!data.students||!data.classInfo){ setRestoreStatus("❌ 유효하지 않은 백업 파일입니다."); return; }
-        if(!confirm(`백업 파일(${data._exported||"날짜미상"})으로 복원할까요?\n현재 데이터가 모두 백업 파일로 대체됩니다.`)) return;
-        localStorage.setItem("eduapp_v1",JSON.stringify(data));
+        if(!confirm(`백업 파일(${data._exported||"날짜미상"})으로 복원할까요?\n현재 학기(${ACTIVE_SEM}학기) 데이터가 모두 백업 파일로 대체됩니다.`)) return;
+        localStorage.setItem(dbKey(),JSON.stringify(data));
         setRestoreStatus("✅ 복원 완료. 페이지를 새로고침합니다.");
         setTimeout(()=>window.location.reload(),1200);
       }catch(err){ setRestoreStatus("❌ 파일을 읽을 수 없습니다: "+err.message); }
@@ -5048,7 +5733,7 @@ function PerfSimpleScore({db,update,areaKey}){
     update(d=>{
       const sc=d.perf.areas[areaKey].scores;
       if(val==="") delete sc[sid];
-      else sc[sid]=Math.max(0,Math.min(area.max,Number(val)));
+      else sc[sid]=Math.max(0,Math.min(area.max,Math.round(Number(val))));
     });
   }
   return (
@@ -5073,7 +5758,7 @@ function PerfSimpleScore({db,update,areaKey}){
                 <td style={{color:"var(--ink-3)"}}>{s.no}</td>
                 <td style={{fontWeight:600}}>{s.name}</td>
                 <td>
-                  <input type="number" min="0" max={area.max} step="0.5" value={area.scores[s.id]??""} onChange={e=>setScore(s.id,e.target.value)} placeholder="–" style={{padding:"5px 9px",fontSize:13,width:100}}/>
+                  <input type="number" min="0" max={area.max} step="1" inputMode="numeric" value={area.scores[s.id]??""} onFocus={e=>{ const el=e.target; if((area.scores[s.id]??"")==="") setScore(s.id,String(area.max)); requestAnimationFrame(()=>{try{el.select();}catch(_){}}); }} onChange={e=>setScore(s.id,e.target.value)} placeholder="–" style={{padding:"5px 9px",fontSize:13,width:100}}/>
                 </td>
               </tr>
             ))}
@@ -5100,7 +5785,7 @@ function PerfTopic({db,update}){
   const list=db.students.filter(s=>s.grade===grade && s.cls===cls).sort((a,b)=>a.no-b.no);
 
   function setScore(sid,val){
-    update(d=>{ const sc=d.perf.areas.topic.scores; if(val==="") delete sc[sid]; else sc[sid]=Math.max(0,Math.min(area.max,Number(val))); });
+    update(d=>{ const sc=d.perf.areas.topic.scores; if(val==="") delete sc[sid]; else sc[sid]=Math.max(0,Math.min(area.max,Math.round(Number(val)))); });
   }
   function setContent(sid,field,val){
     update(d=>{ const c=d.perf.areas.topic.contents; c[sid]=c[sid]||{topic:"",text:""}; c[sid][field]=val; });
@@ -5131,7 +5816,7 @@ function PerfTopic({db,update}){
                   <td><Avatar student={s} photos={photos} size={32}/></td>
                   <td style={{color:"var(--ink-3)"}}>{s.no}</td>
                   <td style={{fontWeight:600}}>{s.name}</td>
-                  <td><input type="number" min="0" max={area.max} step="0.5" value={area.scores[s.id]??""} onChange={e=>setScore(s.id,e.target.value)} placeholder="–" style={{padding:"5px 8px",fontSize:13,width:80}}/></td>
+                  <td><input type="number" min="0" max={area.max} step="1" inputMode="numeric" value={area.scores[s.id]??""} onFocus={e=>{ const el=e.target; if((area.scores[s.id]??"")==="") setScore(s.id,String(area.max)); requestAnimationFrame(()=>{try{el.select();}catch(_){}}); }} onChange={e=>setScore(s.id,e.target.value)} placeholder="–" style={{padding:"5px 8px",fontSize:13,width:80}}/></td>
                   <td style={{fontSize:12.5,color:c.topic?"var(--ink)":"var(--ink-3)"}}>{c.topic? (c.topic.length>20?c.topic.slice(0,20)+"…":c.topic) : "미입력"}</td>
                   <td><button className="btn ghost sm" onClick={()=>setOpenStu(open?null:s.id)}>{open?"접기":"입력/보기"}</button></td>
                 </tr>
@@ -5531,6 +6216,8 @@ function ExamEditor({examId,db,update,onClose}){
   );
 }
 
+if(window.immer && window.immer.setAutoFreeze) window.immer.setAutoFreeze(false);
+applySemTheme();
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
