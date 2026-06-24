@@ -219,7 +219,7 @@ const CLOUD = {
   CLIENT_ID: "307386070110-lbbabm09goo7ode2653r9iebbk4bern7.apps.googleusercontent.com",  // ← 구글 OAuth 클라이언트 ID 붙여넣기 (예: "1234567-abcd.apps.googleusercontent.com")
   SCOPE: "https://www.googleapis.com/auth/drive.file", // 앱이 만든 파일 + Picker로 직접 선택한 파일만 접근(최소 권한)
   FILE_NAME: "gyogwa_haksupgwalli_db.json",
-  API_KEY: "",  // ← (선택) 학습지 제출용 구글 Picker 사용 시 Cloud Console의 API 키를 붙여넣기 (없어도 CSV 가져오기는 동작)
+  API_KEY: "AIzaSyBNVv5wHY-VM0UR4u9y5OsTtMZIY5Lr7FM",  // 학습지 제출용 구글 Picker API 키 (HTTP 리퍼러 + Picker API로 제한 권장)
 };
 // Picker가 drive.file 권한으로 선택 파일에 접근하려면 GCP 프로젝트 번호(appId)가 필요 → CLIENT_ID 앞부분에서 추출
 function gcpAppId(){ return (CLOUD.CLIENT_ID||"").split("-")[0]; }
@@ -326,7 +326,8 @@ function _mergeObj(base,local,remote){
   return out;
 }
 function mergeDB(base,local,remote){
-  if(!remote || Object.keys(remote).length===0) return local;
+  // 클라우드가 비어있거나 학생 데이터가 없으면 로컬 우선 (복원 직후 등)
+  if(!remote || Object.keys(remote).length===0 || !(remote.students&&remote.students.length)) return local;
   if(!local || Object.keys(local).length===0) return remote;
   const merged=_mergeObj(base||{},local,remote);
   merged._v=Math.max(local._v||0, remote._v||0, DB_VERSION);
@@ -1190,9 +1191,10 @@ function App(){
 
   function switchSemester(target){
     if(target===sem) return;
-    saveDB(db);                 // 현재 학기 데이터 확정 저장(현재 키)
-    setActiveSem(target);       // 키·드라이브 파일·테마 전환
-    let next=loadDB();          // 대상 학기 데이터 로드
+    saveDB(db);      // 현재 학기 데이터 확정 저장
+    saveBase(db);    // 동기화 기준도 현재 상태로 맞춤 → 전환 후 병합 시 손실 방지
+    setActiveSem(target);
+    let next=loadDB();
     if(!next){
       if(target===2){
         const carry=window.confirm("2학기를 새로 시작합니다.\n1학기의 학생 명단·시간표를 그대로 가져올까요?\n\n· 확인: 명단·시간표 가져오고 출결·평가 기록은 새로 시작\n· 취소: 완전히 빈 상태로 시작");
@@ -1202,6 +1204,7 @@ function App(){
       }
       saveDB(next);
     }
+    saveBase(next);  // 새 학기 기준도 세팅
     setDb(next);
     setSem(target);
     setView("dashboard");
@@ -5580,9 +5583,15 @@ function BackupManager({db,update}){
         const data=JSON.parse(ev.target.result);
         if(!data.students||!data.classInfo){ setRestoreStatus("❌ 유효하지 않은 백업 파일입니다."); return; }
         if(!confirm(`백업 파일(${data._exported||"날짜미상"})으로 복원할까요?\n현재 학기(${ACTIVE_SEM}학기) 데이터가 모두 백업 파일로 대체됩니다.`)) return;
-        localStorage.setItem(dbKey(),JSON.stringify(data));
+        // 복원 전: 드라이브 동기화 기준(base)도 복원 데이터로 맞춰줌
+        // → 재로드 후 동기화 시 "내가 바꾼 게 없다"고 판단해 클라우드가 덮어쓰지 않음
+        saveBase(data);
+        // 복원 데이터를 현재 학기 키에 저장
+        localStorage.setItem(dbKey(), JSON.stringify(data));
+        // 드라이브 fileId 캐시도 초기화 → 재로드 후 드라이브에서 먼저 가져와 비교
+        setFileId(null);
         setRestoreStatus("✅ 복원 완료. 페이지를 새로고침합니다.");
-        setTimeout(()=>window.location.reload(),1200);
+        setTimeout(()=>window.location.reload(), 1200);
       }catch(err){ setRestoreStatus("❌ 파일을 읽을 수 없습니다: "+err.message); }
     };
     reader.readAsText(file);
