@@ -219,7 +219,7 @@ const CLOUD = {
   CLIENT_ID: "307386070110-lbbabm09goo7ode2653r9iebbk4bern7.apps.googleusercontent.com",  // ← 구글 OAuth 클라이언트 ID 붙여넣기 (예: "1234567-abcd.apps.googleusercontent.com")
   SCOPE: "https://www.googleapis.com/auth/drive.file", // 앱이 만든 파일 + Picker로 직접 선택한 파일만 접근(최소 권한)
   FILE_NAME: "gyogwa_haksupgwalli_db.json",
-  API_KEY: "",  // ← (선택) 학습지 제출용 구글 Picker 사용 시 Cloud Console의 API 키를 붙여넣기 (없어도 CSV 가져오기는 동작)
+  API_KEY: "AIzaSyBNVv5wHY-VM0UR4u9y5OsTtMZIY5Lr7FM",  // 학습지 제출용 구글 Picker API 키 (HTTP 리퍼러 + Picker API로 제한 권장)
 };
 // Picker가 drive.file 권한으로 선택 파일에 접근하려면 GCP 프로젝트 번호(appId)가 필요 → CLIENT_ID 앞부분에서 추출
 function gcpAppId(){ return (CLOUD.CLIENT_ID||"").split("-")[0]; }
