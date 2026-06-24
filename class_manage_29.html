@@ -182,12 +182,15 @@ const {useState,useEffect,useMemo,useRef} = React;
 /* ---------- 저장소: localStorage 기반 영구 저장 (학기별 분리) ---------- */
 const DB_VERSION = 12; // 학사일정(휴일·시험·행사) 반영
 const SEM_KEY = "eduapp_sem";
-function loadSem(){ try{ return localStorage.getItem(SEM_KEY)==="2" ? 2 : 1; }catch(e){ return 1; } }
-let ACTIVE_SEM = loadSem();
-function semSuffix(){ return ACTIVE_SEM===2 ? "_s2" : ""; } // 1학기는 기존 키 그대로(하위호환)
+function loadSem(){
+  try{ localStorage.setItem(SEM_KEY,"1"); }catch(e){}
+  return 1;
+}
+let ACTIVE_SEM = 1;
+function semSuffix(){ return ""; } // 1학기만 사용
 function dbKey(){ return "eduapp_v1"+semSuffix(); }
 function applySemTheme(){ try{ document.documentElement.setAttribute("data-semester", String(ACTIVE_SEM)); }catch(e){} }
-function setActiveSem(s){ ACTIVE_SEM = (Number(s)===2)?2:1; try{ localStorage.setItem(SEM_KEY,String(ACTIVE_SEM)); }catch(e){} applySemTheme(); }
+function setActiveSem(){ ACTIVE_SEM = 1; try{ localStorage.setItem(SEM_KEY,"1"); }catch(e){} applySemTheme(); }
 function loadDB(){
   try{ const r = localStorage.getItem(dbKey()); if(r) return JSON.parse(r); }catch(e){}
   return null;
@@ -281,7 +284,7 @@ function parsePasted(text){
 /* ▲▲▲ 여기까지 ▲▲▲ */
 function baseKey(){ return "eduapp_base_v1"+semSuffix(); }
 function fileIdKey(){ return "eduapp_driveFileId_v1"+semSuffix(); }
-function driveFileName(){ return ACTIVE_SEM===2 ? "gyogwa_haksupgwalli_db_s2.json" : CLOUD.FILE_NAME; }
+function driveFileName(){ return CLOUD.FILE_NAME; }
 const cloudCfgOk = ()=> !!CLOUD.CLIENT_ID;
 const httpsOk = ()=> location.protocol==="https:" || location.hostname==="localhost" || location.hostname==="127.0.0.1";
 function loadBase(){ try{ return JSON.parse(localStorage.getItem(baseKey())||"null"); }catch(e){ return null; } }
@@ -1189,26 +1192,10 @@ function App(){
     const next=structuredClone(prev); fn(next); return next;
   });
 
-  function switchSemester(target){
-    if(target===sem) return;
-    saveDB(db);      // 현재 학기 데이터 확정 저장
-    saveBase(db);    // 동기화 기준도 현재 상태로 맞춤 → 전환 후 병합 시 손실 방지
-    setActiveSem(target);
-    let next=loadDB();
-    if(!next){
-      if(target===2){
-        const carry=window.confirm("2학기를 새로 시작합니다.\n1학기의 학생 명단·시간표를 그대로 가져올까요?\n\n· 확인: 명단·시간표 가져오고 출결·평가 기록은 새로 시작\n· 취소: 완전히 빈 상태로 시작");
-        next=seedSemesterFresh(db, carry);
-      } else {
-        next=seedSemesterFresh(null, false);
-      }
-      saveDB(next);
-    }
-    saveBase(next);  // 새 학기 기준도 세팅
-    setDb(next);
-    setSem(target);
-    setView("dashboard");
-    toast(target===2?"2학기로 전환했습니다":"1학기로 전환했습니다");
+  function switchSemester(){
+    setActiveSem(1);
+    setSem(1);
+    toast("현재는 1학기만 사용합니다.");
   }
 
   const NAV=[
@@ -1258,8 +1245,7 @@ function App(){
         </div>
         <div style={{padding:"10px 14px",borderBottom:"1px solid var(--line)"}}>
           <div className="seg" style={{width:"100%"}}>
-            <button className={sem===1?"on":""} style={{flex:1}} onClick={()=>switchSemester(1)}>1학기</button>
-            <button className={sem===2?"on":""} style={{flex:1}} onClick={()=>switchSemester(2)}>2학기</button>
+            <button className="on" style={{flex:1}} onClick={()=>switchSemester(1)}>1학기</button>
           </div>
         </div>
         <div className="nav">
