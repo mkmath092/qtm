@@ -1,0 +1,1394 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>은서 하루 — 일정·학습·생활 관리</title>
+<link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+:root{
+  --bg:#EDF1F3; --surface:#FFFFFF; --ink:#1E2A32; --muted:#6B7A85;
+  --line:#E2E8EC; --line2:#EFF3F5; --accent:#0F7C66; --accent-soft:#E4F3EF;
+  --now:#E8743B; --now-soft:#FCEDE4; --warn:#C2410C; --done:#94A3B8;
+  --c-학교:#3B82F6; --c-학원:#7C3AED; --c-스터디카페:#D97706; --c-개인학습:#0F7C66;
+  --c-휴식:#94A3B8; --c-저녁식사:#16A34A; --c-이동:#9AA7B0; --c-하교:#64748B;
+  --radius:14px; --shadow:0 1px 3px rgba(30,42,50,.06),0 6px 16px rgba(30,42,50,.05);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{background:var(--bg);color:var(--ink);
+  font-family:"Pretendard",-apple-system,BlinkMacSystemFont,"맑은 고딕","Malgun Gothic",sans-serif;
+  font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:600px;margin:0 auto;min-height:100vh;background:var(--bg);
+  padding:0 0 86px;position:relative}
+/* header */
+header{position:sticky;top:0;z-index:30;background:rgba(237,241,243,.92);
+  backdrop-filter:saturate(180%) blur(10px);padding:14px 18px 10px;border-bottom:1px solid var(--line)}
+.h-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.h-name{font-size:20px;font-weight:800;letter-spacing:-.02em}
+.h-name small{font-weight:600;font-size:12px;color:var(--muted);margin-left:7px}
+.h-date{font-size:13px;color:var(--muted);font-weight:600}
+.h-date b{color:var(--accent)}
+/* tabs (bottom nav) */
+nav{position:fixed;left:0;right:0;bottom:0;z-index:40;display:flex;justify-content:center;
+  background:rgba(255,255,255,.96);backdrop-filter:blur(10px);border-top:1px solid var(--line);
+  padding:6px max(8px,env(safe-area-inset-left)) calc(6px + env(safe-area-inset-bottom))}
+nav .inner{display:flex;width:100%;max-width:600px}
+nav button{flex:1;background:none;border:0;padding:7px 2px 5px;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--muted);
+  font-family:inherit;font-size:10.5px;font-weight:600;border-radius:10px;transition:.15s}
+nav button .ic{font-size:19px;line-height:1}
+nav button.on{color:var(--accent)}
+nav button.on .ic{transform:translateY(-1px)}
+main{padding:16px 16px 8px}
+/* cards & generic */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);margin-bottom:14px;overflow:hidden}
+.card-h{display:flex;align-items:center;justify-content:space-between;
+  padding:13px 16px 10px;border-bottom:1px solid var(--line2)}
+.card-h h2{font-size:14px;font-weight:800;letter-spacing:-.01em;display:flex;align-items:center;gap:7px}
+.card-h h2 .em{font-size:16px}
+.card-b{padding:8px 16px 14px}
+.sec-eyebrow{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);margin:18px 4px 8px}
+.muted{color:var(--muted)}.tiny{font-size:12px}.center{text-align:center}
+.empty{color:var(--muted);font-size:13px;text-align:center;padding:18px 8px}
+.btn{font-family:inherit;font-weight:700;border-radius:10px;border:1px solid var(--line);
+  background:var(--surface);color:var(--ink);padding:8px 13px;font-size:13px;cursor:pointer;transition:.15s}
+.btn:active{transform:scale(.97)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.coral{background:var(--now);border-color:var(--now);color:#fff}
+.btn.sm{padding:5px 10px;font-size:12px;border-radius:8px}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--accent);padding:6px 8px}
+.row-add{width:100%;border:1.5px dashed var(--line);background:var(--line2);color:var(--muted);
+  border-radius:10px;padding:10px;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit;margin-top:6px}
+.row-add:active{transform:scale(.99)}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;
+  padding:2px 8px;border-radius:20px;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+.badge{display:inline-block;font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:6px;color:#fff;white-space:nowrap}
+.star{color:var(--now);font-weight:800}
+/* today timeline */
+.tl{position:relative;padding-left:4px}
+.tl-item{display:flex;gap:11px;padding:9px 0;border-bottom:1px solid var(--line2)}
+.tl-item:last-child{border-bottom:0}
+.tl-time{flex:0 0 46px;font-size:12px;font-weight:800;color:var(--muted);padding-top:2px;text-align:right;font-variant-numeric:tabular-nums}
+.tl-time span{display:block;font-weight:600;font-size:11px;color:var(--line);color:#aeb8be}
+.tl-body{flex:1;min-width:0}
+.tl-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.tl-title{font-weight:700;font-size:14px}
+.tl-sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+.tl-prep{margin-top:5px;display:flex;flex-wrap:wrap;gap:4px}
+.tl-prep .p{font-size:11px;background:var(--line2);color:#566;padding:2px 7px;border-radius:6px}
+.tl-item.now{background:var(--now-soft);margin:0 -10px;padding-left:14px;padding-right:10px;border-radius:10px;border-bottom:0}
+.tl-item.now .tl-time{color:var(--now)}
+.nowtag{font-size:10px;font-weight:800;color:#fff;background:var(--now);padding:1px 6px;border-radius:5px}
+.chk{flex:0 0 auto;width:22px;height:22px;border:2px solid var(--line);border-radius:7px;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;color:transparent;transition:.12s;background:#fff}
+.chk.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.done .tl-title{text-decoration:line-through;color:var(--done)}
+/* school timetable grid */
+.tt{width:100%;border-collapse:collapse;font-size:11.5px;table-layout:fixed}
+.tt th,.tt td{border:1px solid var(--line);padding:4px 3px;text-align:center;vertical-align:top}
+.tt th{background:var(--line2);font-weight:800;font-size:11px;color:var(--muted)}
+.tt td .s{font-weight:800;font-size:12px}
+.tt td .t{display:block;font-size:9.5px;color:var(--muted);line-height:1.25;margin-top:1px}
+.tt col.today,.tt td.today{background:var(--accent-soft)}
+.tt th.today{background:var(--accent);color:#fff}
+/* prep checklist */
+.check-list{list-style:none}
+.check-list li{display:flex;align-items:flex-start;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line2)}
+.check-list li:last-child{border-bottom:0}
+.cl-txt{flex:1}.cl-txt .m{font-size:11px;color:var(--muted)}
+.done2{text-decoration:line-through;color:var(--done)}
+/* material progress */
+.mat{border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden}
+.mat-h{display:flex;align-items:center;gap:9px;padding:11px 13px;cursor:pointer;background:var(--line2)}
+.mat-h .nm{font-weight:800;font-size:14px;flex:1}
+.mat-h .pct{font-size:12px;font-weight:800;color:var(--accent)}
+.bar{height:5px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:4px;transition:.3s}
+.toc{padding:4px 13px 10px;display:none}
+.toc.open{display:block}
+.toc-it{display:flex;align-items:center;gap:9px;padding:6px 0;border-bottom:1px solid var(--line2);font-size:13px}
+.toc-it:last-child{border-bottom:0}
+.toc-it .lbl{flex:1}.toc-it .dt{font-size:10.5px;color:var(--done)}
+.toc-it.d .lbl{text-decoration:line-through;color:var(--done)}
+.unit-h{font-size:11px;font-weight:800;color:var(--muted);margin:9px 0 1px;letter-spacing:.02em}
+/* list rows (config) */
+.lrow{display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--line2)}
+.lrow:last-child{border-bottom:0}
+.lrow .lr-main{flex:1;min-width:0}
+.lrow .lr-t{font-weight:700;font-size:14px}
+.lrow .lr-s{font-size:12px;color:var(--muted);margin-top:1px}
+.lrow .lr-act{display:flex;gap:4px}
+.iconbtn{border:0;background:var(--line2);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:14px;color:var(--muted)}
+.iconbtn:active{transform:scale(.92)}
+/* ledger */
+.led{display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--line2)}
+.led .amt{font-weight:800;font-variant-numeric:tabular-nums}
+.led .amt.in{color:var(--accent)}.led .amt.out{color:var(--warn)}
+.bal{background:var(--accent-soft);border-radius:12px;padding:14px 16px;display:flex;
+  align-items:baseline;justify-content:space-between;margin-bottom:10px}
+.bal .v{font-size:24px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums}
+/* kv */
+.kv{display:flex;justify-content:space-between;padding:8px 2px;border-bottom:1px solid var(--line2);font-size:13.5px}
+.kv:last-child{border-bottom:0}.kv .k{color:var(--muted);font-weight:600}.kv .v{font-weight:700}
+/* modal */
+.scrim{position:fixed;inset:0;background:rgba(20,28,33,.45);z-index:50;display:none;
+  align-items:flex-end;justify-content:center}
+.scrim.on{display:flex}
+.sheet{background:var(--surface);width:100%;max-width:600px;border-radius:18px 18px 0 0;
+  padding:18px 18px calc(20px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto;
+  animation:up .22s cubic-bezier(.2,.8,.2,1)}
+@keyframes up{from{transform:translateY(30px);opacity:.6}to{transform:translateY(0);opacity:1}}
+.sheet h3{font-size:17px;font-weight:800;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center}
+.sheet h3 .x{font-size:22px;color:var(--muted);cursor:pointer;line-height:1}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:5px}
+.field input,.field select,.field textarea{width:100%;font-family:inherit;font-size:15px;
+  border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff;color:var(--ink)}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--accent)}
+.field textarea{resize:vertical;min-height:62px}
+.f2{display:flex;gap:10px}.f2>*{flex:1}
+.sheet-act{display:flex;gap:10px;margin-top:8px}.sheet-act .btn{flex:1;padding:12px}
+.msgbox{background:#f7f9fa;border:1px solid var(--line);border-radius:12px;padding:13px;
+  font-size:13px;white-space:pre-wrap;line-height:1.6;max-height:46vh;overflow:auto}
+/* toast */
+.toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(20px);
+  background:var(--ink);color:#fff;padding:11px 18px;border-radius:24px;font-size:13px;font-weight:700;
+  z-index:60;opacity:0;transition:.25s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+@media (min-width:640px){
+  header{position:static}
+  nav{position:sticky;top:0;bottom:auto;border-top:0;border-bottom:1px solid var(--line)}
+  nav button{flex-direction:row;gap:7px;font-size:13.5px;padding:13px 4px;border-radius:0}
+  nav button .ic{font-size:16px}
+  nav button.on{box-shadow:inset 0 -2px 0 var(--accent)}
+  .wrap{padding-bottom:28px}
+  main{padding:20px 20px 8px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* habit screen */
+.hhero{display:flex;align-items:center;justify-content:space-between;background:var(--accent);color:#fff;
+  border-radius:var(--radius);padding:16px 18px;margin-bottom:14px;box-shadow:var(--shadow)}
+.hhero-num{font-size:34px;font-weight:800;line-height:1}
+.hhero-lbl{font-size:12px;font-weight:700;opacity:.9;margin-top:3px}
+.hhero-r{text-align:right}.hhero .muted{color:rgba(255,255,255,.85)}
+.hcard{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px;box-shadow:var(--shadow)}
+.hcard-h{display:flex;align-items:center;gap:8px}
+.hicon{font-size:18px}.hname{font-weight:800;font-size:14px;flex:1}
+.hstreak{font-size:12px;font-weight:800;color:var(--now)}
+.hdots{display:flex;gap:5px;margin:9px 0 5px;flex-wrap:wrap}
+.hd{width:17px;height:17px;border-radius:5px;background:var(--line)}
+.hd.on{background:var(--accent)}
+.hd.off{background:#fff;border:1px solid var(--line)}
+.hd.bad{background:var(--now)}
+.hd.na{background:transparent;border:1px dashed var(--line)}
+.hd.today{background:#fff;border:2px solid var(--now)}
+/* habit tiles */
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px 14px 13px;
+  box-shadow:var(--shadow);text-align:left;cursor:pointer;font-family:inherit;display:flex;flex-direction:column;transition:.15s}
+.tile:active{transform:scale(.97)}
+.tile-top{display:flex;align-items:center;justify-content:space-between}
+.tile-ic{font-size:23px}.tile-go{font-size:14px;color:var(--muted)}
+.tile-val{font-size:23px;font-weight:800;color:var(--ink);line-height:1.1;margin-top:8px}
+.tile-lbl{font-size:13px;font-weight:700;margin-top:3px}
+.tile-sub{font-size:11px;color:var(--muted);margin-top:1px}
+/* phone hero */
+.phero{display:flex;align-items:center;justify-content:space-between;background:var(--accent);color:#fff;
+  border-radius:var(--radius);padding:16px 18px;margin-bottom:14px;box-shadow:var(--shadow)}
+.phero.over{background:var(--now)}
+.phero-num{font-size:34px;font-weight:800;line-height:1}.phero-num span{font-size:16px;font-weight:700;margin-left:2px}
+.phero-lbl{font-size:12px;font-weight:700;opacity:.9;margin-top:3px}
+.phero-sub{text-align:right;font-size:13px;line-height:1.7;color:rgba(255,255,255,.9)}.phero-sub b{font-size:15px;color:#fff}
+/* day selector + plan button */
+.daybar{display:flex;gap:6px;margin-bottom:12px}
+.daybtn{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:9px 0;
+  font-family:inherit;font-weight:700;font-size:14px;color:var(--muted);cursor:pointer}
+.daybtn.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.planbtn{border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:8px;
+  padding:5px 9px;font-size:11px;font-weight:800;cursor:pointer;font-family:inherit;white-space:nowrap;align-self:flex-start}
+.planbtn.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+/* sheet summary rows */
+.srow{display:flex;justify-content:space-between;align-items:center;padding:9px 2px;border-bottom:1px solid var(--line2);font-size:14px}
+.srow:last-child{border-bottom:0}.sheet-list{margin-bottom:10px}
+/* header date clickable */
+#hDate{cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:5px;border-radius:8px;
+  padding:2px 6px;margin-right:-6px;transition:.15s}
+#hDate:active{background:var(--line2)}
+.past-badge{font-size:10px;font-weight:800;background:var(--now);color:#fff;padding:2px 6px;border-radius:6px;vertical-align:middle}
+.cal-icon{font-size:14px;opacity:.7}
+/* calendar grid */
+.cal-grid{width:100%;border-collapse:collapse;margin-top:4px}
+.cal-grid th{font-size:11px;font-weight:800;color:var(--muted);padding:4px 0;text-align:center}
+.cal-grid th.cal-wkend{color:var(--now)}
+.cal-grid td{text-align:center;padding:0;width:14.28%}
+.cal-cell{font-size:14px;font-weight:600;padding:9px 4px 7px;border-radius:10px;cursor:pointer;position:relative;line-height:1}
+.cal-cell:active{background:var(--line2)}
+.cal-wkend.cal-cell{color:var(--now)}
+.cal-today{background:var(--accent-soft);color:var(--accent);font-weight:800}
+.cal-sel{background:var(--accent)!important;color:#fff!important;font-weight:800}
+.cal-future{color:var(--line);pointer-events:none}
+.cal-dot{display:block;width:4px;height:4px;border-radius:50%;background:var(--accent);margin:3px auto 0}
+.cal-sel .cal-dot{background:rgba(255,255,255,.7)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="h-top">
+      <div class="h-name">은서 하루 <small id="hChild"></small></div>
+      <div class="h-date" id="hDate"></div>
+    </div>
+  </header>
+  <nav><div class="inner">
+    <button data-tab="today" class="on"><span class="ic">🗓️</span>오늘</button>
+    <button data-tab="week"><span class="ic">📅</span>시간표</button>
+    <button data-tab="after"><span class="ic">🏃</span>방과후</button>
+    <button data-tab="study"><span class="ic">📚</span>학습</button>
+    <button data-tab="phone"><span class="ic">📱</span>핸드폰</button>
+    <button data-tab="money"><span class="ic">💰</span>용돈</button>
+    <button data-tab="habit"><span class="ic">🔥</span>습관</button>
+    <button data-tab="data"><span class="ic">⚙️</span>자료</button>
+  </div></nav>
+  <main id="view"></main>
+</div>
+<div class="scrim" id="scrim"><div class="sheet" id="sheet"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ============ SEED DATA (6학년 이은서) ============ */
+const SEED = {
+  child:{name:"이은서",grade:"초6",school:"풍천초등학교",classroom:"1반",birthdate:"2014-10-20"},
+  habits:[
+    {id:"study_eve",name:"저녁 개인학습",icon:"📖",kind:"after",cat:"개인학습"},
+    {id:"english",name:"영어 학원",icon:"🔤",kind:"after",cats:["학원"],match:"영어"},
+    {id:"taekwon",name:"특공무술",icon:"🥋",kind:"after",match:"특공무술"},
+    {id:"ingang",name:"중1 수학 인강",icon:"🎬",kind:"study",mid:"m_ingang"},
+    {id:"phone",name:"핸드폰 기준 준수",icon:"📱",kind:"phone"}
+  ],
+  week:{
+    label:"6월 22일 ~ 26일 (17주)",
+    note:"학교 시간표는 매주 바뀝니다. 주간학습 안내 PDF를 올리면 이번 주 시간표로 채울 수 있어요. (아침활동: 매일 독서, 금요일 독서록 제출)",
+    days:{
+      "월":[{p:1,s:"도덕",t:"인공지능으로 일하는 미래"},{p:2,s:"영어",t:"Into the Art"},{p:3,s:"국어",t:"견학 기록문 쓰기"},{p:4,s:"미술",t:"시대별 미술 작품 감상 ★평가"},{p:5,s:"미술",t:"시대별 미술 작품 감상 ★평가"},{p:6,s:"자율",t:"동아리 활동 정리 발표"}],
+      "화":[{p:1,s:"수학",t:"띠그래프와 원그래프 해석"},{p:2,s:"체육",t:"외국의 전통 표현"},{p:3,s:"과학",t:"계절에 따라 달라지는 별자리"},{p:4,s:"영어",t:"Lesson 1-6 ★평가"},{p:5,s:"사회",t:"지구본·세계지도 특징 ★평가"},{p:6,s:"사회",t:"지구본·세계지도 특징"}],
+      "수":[{p:1,s:"진로",t:"진로체험교육 (직업 체험)"},{p:2,s:"진로",t:"진로체험교육"},{p:3,s:"진로",t:"진로체험교육"},{p:4,s:"진로",t:"진로체험교육"},{p:5,s:"음악",t:"음악과 이야기의 만남"},{p:6,s:"사회",t:"세계 여러 국가의 위치 표현"}],
+      "목":[{p:1,s:"국어",t:"견학 기록문 쓰기"},{p:2,s:"국어",t:"견학 기록문 쓰기"},{p:3,s:"사회",t:"세계 여러 국가의 위치"},{p:4,s:"수학",t:"여러 가지 그래프 활용"},{p:5,s:"체육",t:"티니클링"},{p:6,s:"음악",t:"함께 지구를 구해요"}],
+      "금":[{p:1,s:"국어",t:"견학 기록문 쓰기"},{p:2,s:"국어",t:"마무리하기"},{p:3,s:"체육",t:"티니클링"},{p:4,s:"수학",t:"여러 가지 그래프 활용"},{p:5,s:"음악",t:"함께 지구를 구해요 ★평가"}]
+    }
+  },
+  after:{
+    "월":[
+      {st:"",et:"14:40",k:"하교",c:"하교",pl:"학교→집",pr:[],n:""},
+      {st:"14:40",et:"15:00",k:"휴식",c:"하교 후 휴식",pl:"집",pr:["핸드폰 시간","게임 등"],n:""},
+      {st:"15:00",et:"15:30",k:"이동",c:"셀레나 영어 학원",pl:"집→영어 학원",pr:["영어 학원 교재"],n:"준비물 챙겼는지 확인"},
+      {st:"15:30",et:"16:30",k:"학원",c:"영어 학습",pl:"영어 학원",pr:["영어 학원 교재"],n:""},
+      {st:"16:30",et:"17:00",k:"이동",c:"집으로 이동",pl:"영어 학원→집",pr:[],n:"픽업 여부 확인"},
+      {st:"17:00",et:"17:40",k:"휴식",c:"휴식",pl:"집",pr:["핸드폰 시간","게임 등"],n:"15분 부여 가능"},
+      {st:"18:00",et:"19:00",k:"학원",c:"특공무술",pl:"체육관",pr:["도복"],n:""},
+      {st:"19:00",et:"20:30",k:"저녁식사",c:"저녁식사 및 큐티",pl:"집",pr:[],n:""},
+      {st:"20:30",et:"22:00",k:"개인학습",c:"수학 중1 인터넷 강의 수강 및 학습",pl:"집",pr:["중1 수학 교재","태블릿"],n:""}
+    ],
+    "화":[
+      {st:"",et:"14:40",k:"하교",c:"하교",pl:"학교→집",pr:[],n:""},
+      {st:"14:40",et:"15:00",k:"휴식",c:"하교 후 휴식",pl:"집",pr:["핸드폰 시간","게임 등"],n:""},
+      {st:"15:00",et:"15:30",k:"이동",c:"스터디 카페",pl:"집→스터디 카페",pr:["중1 수학 교재","영어 교재","태블릿","이어폰"],n:"준비물 챙겼는지 확인"},
+      {st:"15:30",et:"17:30",k:"스터디카페",c:"수학 인강·학습, 영어 과제·단어 암기",pl:"스터디 카페",pr:["중1 수학 교재","영어 교재","태블릿","이어폰"],n:""},
+      {st:"17:30",et:"18:00",k:"이동",c:"집으로 이동",pl:"스터디 카페→집",pr:[],n:"픽업 여부 확인"},
+      {st:"18:00",et:"19:00",k:"학원",c:"특공무술",pl:"체육관",pr:["도복"],n:""},
+      {st:"19:00",et:"20:30",k:"저녁식사",c:"저녁식사 및 큐티",pl:"집",pr:[],n:""},
+      {st:"20:30",et:"22:00",k:"개인학습",c:"초6 수학 복습(또는 중1 수학), 영어 과제·단어 확인",pl:"집",pr:["중1 수학 교재","태블릿"],n:"영어 학원 과제 확인"}
+    ],
+    "수":[
+      {st:"",et:"13:40",k:"하교",c:"하교",pl:"학교→집",pr:[],n:""},
+      {st:"14:30",et:"15:30",k:"스터디카페",c:"수학 초6 복습, 영어 단어 암기",pl:"스터디 카페",pr:["초6 수학 교재","영어 교재"],n:""},
+      {st:"16:00",et:"17:30",k:"학원",c:"영어 학원 학습",pl:"영어 학원",pr:["영어 학원 교재"],n:""},
+      {st:"17:30",et:"18:00",k:"이동",c:"특공무술로 이동",pl:"",pr:[],n:"픽업 필요"},
+      {st:"18:00",et:"19:00",k:"학원",c:"특공무술",pl:"체육관",pr:["도복"],n:""},
+      {st:"19:00",et:"20:30",k:"저녁식사",c:"저녁식사 및 큐티",pl:"집",pr:[],n:""},
+      {st:"20:30",et:"22:00",k:"개인학습",c:"초6/중1 수학, 영어 과제 확인",pl:"집",pr:["중1 수학 교재","태블릿"],n:"영어 학원 과제 확인"}
+    ],
+    "목":[
+      {st:"",et:"14:40",k:"하교",c:"하교",pl:"학교→집",pr:[],n:""},
+      {st:"14:40",et:"15:00",k:"휴식",c:"하교 후 휴식",pl:"집",pr:["핸드폰 시간","게임 등"],n:""},
+      {st:"15:00",et:"15:30",k:"이동",c:"스터디 카페",pl:"집→스터디 카페",pr:["중1 수학 교재","영어 교재","태블릿","이어폰"],n:"준비물 챙겼는지 확인"},
+      {st:"15:30",et:"16:30",k:"스터디카페",c:"초6 수학 복습, 영어 과제·단어 확인",pl:"스터디 카페",pr:["초6 수학 교재","영어 교재","태블릿","이어폰"],n:""},
+      {st:"16:30",et:"17:00",k:"이동",c:"영어 학원으로 이동",pl:"",pr:["영어 학원 교재"],n:""},
+      {st:"17:00",et:"18:30",k:"학원",c:"영어 학원 학습",pl:"영어 학원",pr:["영어 학원 교재"],n:""},
+      {st:"19:00",et:"20:30",k:"저녁식사",c:"저녁식사 및 큐티",pl:"집",pr:[],n:""},
+      {st:"20:30",et:"22:00",k:"개인학습",c:"중1 수학 학습",pl:"집",pr:["중1 수학 교재","태블릿"],n:""}
+    ],
+    "금":[
+      {st:"",et:"14:40",k:"하교",c:"하교",pl:"학교→집",pr:[],n:""},
+      {st:"14:40",et:"15:00",k:"휴식",c:"하교 후 휴식",pl:"집",pr:["핸드폰 시간","게임 등"],n:""},
+      {st:"15:00",et:"15:30",k:"이동",c:"스터디 카페",pl:"집→스터디 카페",pr:["중1 수학 교재","영어 교재","태블릿","이어폰"],n:"준비물 챙겼는지 확인"},
+      {st:"15:30",et:"17:30",k:"스터디카페",c:"수학 인강·학습, 영어 과제·단어 암기",pl:"스터디 카페",pr:["중1 수학 교재","영어 교재","태블릿","이어폰"],n:""},
+      {st:"17:30",et:"18:00",k:"이동",c:"집으로 이동",pl:"스터디 카페→집",pr:[],n:"픽업 여부 확인"}
+    ],
+    "토":[],"일":[]
+  },
+  studyPlan:{"월":["m_grammar","m_voca","m_ingang"],"화":["m_ingang","m_voca"],"수":["m_topmath","m_grammar"],"목":["m_topmath","m_ingang"],"금":["m_ingang","m_voca"],"토":[],"일":[]},
+  phoneRules:[{name:"평일 기본",min:30},{name:"주말 기본",min:60}],
+  phoneMissions:[{name:"큐티 완료",min:15},{name:"영어 학습 완료",min:20},{name:"학원 다녀옴",min:15}],
+  supplyRules:[
+    {type:"요일",val:"수",items:["체육복"],n:"체육 수업"},
+    {type:"과목",val:"수학 중1",items:["체크체크 수학 교재(중1)","태블릿","이어폰"],n:"인강 듣기 위한 교재·장비"},
+    {type:"과목",val:"수학 초6",items:["초6 수학 교재"],n:""},
+    {type:"과목",val:"영어",items:["영어 학원 교재","영어 알림장"],n:"숙제 확인"},
+    {type:"이벤트",val:"목장",items:["태블릿","닌텐도"],n:"보통 금요일 저녁"},
+    {type:"요일",val:"월,화,수,목,금",items:["학교 준비물","물통","가방정리"],n:"아침 알림"},
+    {type:"과목",val:"특공무술",items:["도복"],n:""},
+    {type:"이벤트",val:"스터디카페",items:["수학 교재","영어 교재"],n:""}
+  ],
+  events:[
+    {date:"2026-06-24",type:"진로",title:"진로체험교육 (1~4교시, 교내)",subject:"진로",prep:"",check:true,n:"직업 체험 부스 2개 선택"},
+    {date:"2026-06-25",type:"수행평가",title:"수학 단원평가",subject:"수학",prep:"오답노트",check:true,n:""},
+    {date:"2026-06-26",type:"수행평가",title:"음악 — 노랫말 바꾸기 프로젝트",subject:"음악",prep:"",check:false,n:""},
+    {date:"2026-07-02",type:"행사",title:"마약예방교육",subject:"",prep:"",check:false,n:""},
+    {date:"2026-07-10",type:"행사",title:"2학기 전교임원선거",subject:"",prep:"",check:false,n:""},
+    {date:"2026-07-13",type:"행사",title:"학교폭력예방교육 (3~4교시)",subject:"",prep:"",check:false,n:""},
+    {date:"2026-07-20",type:"행사",title:"방문세금교실 (2교시)",subject:"",prep:"",check:false,n:""},
+    {date:"2026-07-24",type:"행사",title:"여름방학식 (5교시 후 하교)",subject:"",prep:"",check:false,n:""}
+  ],
+  materials:[
+    {id:"m_topmath",name:"최상위 수학 6-1",subject:"수학",type:"문제집",level:"초6",
+     toc:["1. 분수의 나눗셈","2. 각기둥과 각뿔","3. 소수의 나눗셈","4. 비와 비율","5. 여러 가지 그래프","6. 직육면체의 겉넓이와 부피"].map((l,i)=>({label:l,done:false}))},
+    {id:"m_ssenb",name:"쎈 B 6-1",subject:"수학",type:"문제집",level:"초6",toc:[]},
+    {id:"m_checkcheck",name:"체크체크 베이직 중1-1",subject:"수학",type:"문제집",level:"중1",
+     toc:["[1단원] 01강 소수와 합성수","[1단원] 02강 거듭제곱","[1단원] 03강 소인수분해","[1단원] 04강 약수 구하기","[2단원] 05강 최대공약수","[2단원] 06강 최소공배수","[3단원] 07강 정수와 유리수의 뜻","[3단원] 08강 수직선과 절댓값","[3단원] 09강 수의 대소 관계","[4단원] 10강 덧셈","[4단원] 11강 뺄셈","[4단원] 12강 곱셈(1)","[4단원] 13강 곱셈(2)","[4단원] 14강 나눗셈","[4단원] 15강 혼합 계산","[5단원] 16강 문자를 사용한 식","[5단원] 17강 식의 값","[5단원] 18강 일차식의 계산(1)","[5단원] 19강 일차식의 계산(2)","[6단원] 20강 등식","[6단원] 21강 등식의 성질","[6단원] 22강 일차방정식의 풀이","[6단원] 23강 복잡한 일차방정식","[6단원] 24강 일차방정식의 활용","[7단원] 25강 순서쌍과 좌표","[7단원] 26강 그래프와 해석","[8단원] 27강 정비례","[8단원] 28강 정비례 그래프 성질","[8단원] 29강 반비례","[8단원] 30강 반비례 그래프 성질"].map(l=>({label:l,done:false}))},
+    {id:"m_ingang",name:"중1 수학 인강",subject:"수학",type:"인강",level:"중1",
+     toc:["0. OT","1. 소수와 합성수","2. 거듭제곱","3. 소인수분해","4. 약수 구하기 (1)","5. 약수 구하기 (2)","6. 소인수분해 단원테스트","7. 공약수와 최대공약수","8. 공배수와 최소공배수","9. 최대공약수·최소공배수 테스트","10. 정수와 유리수의 뜻","11. 수직선과 절댓값","12. 수의 대소관계","13. 정수와 유리수 테스트","14. 덧셈(1)","15. 덧셈(2)","16. 뺄셈(1)","17. 뺄셈(2)","18. 곱셈(1)","19. 곱셈(2)","20. 나눗셈","21. 혼합계산","22. 정수·유리수 계산 테스트","23. 문자를 사용한 식","24. 식의 값","25. 일차식의 계산(1)","26. 일차식의 계산(2)","27. 문자와 식 테스트","28. 등식","29. 등식의 성질","30. 일차방정식의 풀이","31. 복잡한 일차방정식","32. 일차방정식의 활용 (1)","33. 일차방정식의 활용 (2)","34. 일차방정식 테스트","35. 순서쌍과 좌표","36. 그래프와 그 해석","37. 좌표평면 테스트","38. 정비례","39. 정비례 그래프 성질(1)","40. 정비례 그래프 성질(2)","41. 반비례","42. 반비례 그래프 성질(1)","43. 반비례 그래프 성질(2)","44. 정비례·반비례 테스트"]
+       .map((l,i)=>({label:l,done:i===20||i===21,dt:i===20?"2026-06-16":i===21?"2026-06-20":""}))},
+    {id:"m_grammar",name:"Grammar (삼성영어)",subject:"영어",type:"학원교재",level:"",
+     toc:["1. 문장의 종류","2. 시제","3. 조동사","4. 명사와 관사","5. 대명사","6. 형용사와 부사","7. 비교","8. 문장의 구조","9. to부정사와 동명사","10. 전치사","11. 접속사"].map(l=>({label:l,done:false}))},
+    {id:"m_voca",name:"Daily Voca Advanced",subject:"영어",type:"학원교재",level:"중등 필수 768단어",
+     toc:Array.from({length:24},(_,i)=>({label:`Week ${i+1}`,done:false}))},
+    {id:"m_wordc",name:"WORD C",subject:"영어",type:"학원교재",level:"",toc:[]}
+  ],
+  devices:[
+    {name:"은서 아이폰 14 Pro",type:"아이폰",use:"일반",wd:30,we:60,exc:"시험기간 단축",n:""}
+  ],
+  allowance:{
+    rules:{"지급 주기":"2주 1회","정기 지급액":"15,000원","지급 요일":"격주 토요일","이월 규칙":"없음"},
+    income:["정기 용돈","심부름/보너스"],
+    expense:["간식","학용품","기타"],
+    missions:[
+      {name:"큐티 1회",amount:1000,due:"",paid:false},
+      {name:"6/30까지 5,000원 이상 보유 시 보너스",amount:3000,due:"2026-06-30",paid:false}
+    ],
+    ledger:[]
+  },
+  attachments:[
+    {title:"주간학습 안내 (6학년)",domain:"일정",fmt:"PDF",file:"weekly_table_6grade.pdf",src:"학교 알림장",cycle:"매주",done:false},
+    {title:"은서 방과후 시간표",domain:"일정",fmt:"PDF",file:"은서_방과후_시간표.pdf",src:"집",cycle:"수시",done:true},
+    {title:"스크린타임 캡처",domain:"핸드폰",fmt:"이미지",file:"screentime.png",src:"기기",cycle:"매일",done:false},
+    {title:"최상위 수학 6-1 목차",domain:"학습",fmt:"PDF",file:"index_topmath_6-1.pdf",src:"교재 스캔",cycle:"1회",done:true},
+    {title:"체크체크 중1-1 목차",domain:"학습",fmt:"PDF",file:"index_checkcheck_1-1.pdf",src:"교재 스캔",cycle:"1회",done:true},
+    {title:"Grammar 목차",domain:"학습",fmt:"PDF",file:"index_grammar.pdf",src:"교재 스캔",cycle:"1회",done:true},
+    {title:"중1 수학 인강 목차·진도",domain:"학습",fmt:"이미지",file:"index_ingang.jpg",src:"캡처",cycle:"수시",done:true}
+  ]
+};
+
+/* ============ STATE ============ */
+const KEY="eunseo_app_v1";
+const SYNC_KEY="eunseo_sync_url";
+let syncUrl = localStorage.getItem(SYNC_KEY)||"https://macmini-brain.tail6f451c.ts.net";
+let _syncTimer=null;
+let S = (()=>{ try{const r=localStorage.getItem(KEY); return r?JSON.parse(r):clone(SEED);}catch(e){return clone(SEED);} })();
+function clone(o){return JSON.parse(JSON.stringify(o));}
+
+function save(){
+  try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){toast("저장 공간이 가득 찼어요");}
+  // 서버 자동 동기화 (설정된 경우, 1초 디바운스)
+  if(syncUrl){ clearTimeout(_syncTimer); _syncTimer=setTimeout(syncPush,1000); }
+}
+
+async function syncPush(){
+  if(!syncUrl) return;
+  try{
+    const r=await fetch(syncUrl+"/state",{
+      method:"PUT",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(S),signal:AbortSignal.timeout(5000)
+    });
+    _setSyncStatus(r.ok?"ok":"err");
+    if(r.ok) console.log("[sync] 서버 저장 완료");
+  }catch(e){ _setSyncStatus("err"); console.warn("[sync]",e.message); }
+}
+
+async function syncPull(){
+  if(!syncUrl){ toast("먼저 맥미니 주소를 설정하세요"); return; }
+  try{
+    const r=await fetch(syncUrl+"/state",{signal:AbortSignal.timeout(5000)});
+    if(!r.ok) throw new Error("서버 응답 오류 "+r.status);
+    S=await r.json(); normalize(); save(); render();
+    toast("서버에서 불러왔어요 ✓"); _setSyncStatus("ok");
+  }catch(e){ toast("서버 연결 실패: "+e.message); _setSyncStatus("err"); }
+}
+
+async function syncTest(){
+  const url=$("#f_sync_url").value.trim();
+  if(!url){ toast("주소를 입력하세요"); return; }
+  try{
+    const r=await fetch(url+"/health",{signal:AbortSignal.timeout(4000)});
+    const d=await r.json();
+    if(d.status==="ok"){
+      syncUrl=url; localStorage.setItem(SYNC_KEY,syncUrl);
+      toast("연결 성공 ✓  "+url); _setSyncStatus("ok"); renderView();
+    }
+  }catch(e){ toast("연결 실패: "+e.message); _setSyncStatus("err"); }
+}
+
+function _setSyncStatus(s){
+  const el=document.getElementById("syncDot"); if(!el) return;
+  el.textContent=s==="ok"?"🟢":s==="err"?"🔴":"⚪";
+}
+
+function clearSyncUrl(){
+  syncUrl=""; localStorage.removeItem(SYNC_KEY); renderView(); toast("서버 연동 해제");
+}
+function normalize(){
+  if(!S.done) S.done={};                 // per-date 완료 체크
+  if(!S.phoneLog) S.phoneLog=[];
+  if(!S.habits) S.habits=clone(SEED.habits);
+  if(!S.studyPlan) S.studyPlan=clone(SEED.studyPlan);
+  if(!S.phoneRules) S.phoneRules=clone(SEED.phoneRules);
+  if(!S.phoneMissions) S.phoneMissions=clone(SEED.phoneMissions);
+  if(!S.allowance.missions) S.allowance.missions=clone(SEED.allowance.missions);
+  S.phoneLog.forEach(e=>{ if(e.min==null&&e.minutes!=null)e.min=e.minutes; if(!e.kind)e.kind="use"; if(e.label==null)e.label=e.device||"사용"; });
+}
+normalize();
+
+/* ============ HELPERS ============ */
+const DOW=["일","월","화","수","목","금","토"];
+const $=(s,el=document)=>el.querySelector(s);
+function todayStr(d=new Date()){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function dowOf(d=new Date()){return DOW[d.getDay()];}
+function nowMin(){const d=new Date();return d.getHours()*60+d.getMinutes();}
+function toMin(t){if(!t)return null;const[a,b]=t.split(":").map(Number);return a*60+b;}
+function esc(s){return(s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function catColor(k){return getComputedStyle(document.documentElement).getPropertyValue("--c-"+k)||"#888";}
+function highlightStar(t){return esc(t).replace(/★평가/g,'<span class="star">★평가</span>');}
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(t._);t._=setTimeout(()=>t.classList.remove("on"),2200);}
+
+let TAB="today";
+let viewDate=(()=>{const d=new Date();d.setHours(0,0,0,0);return d;})();
+let CAL_MONTH=new Date(viewDate);
+function viewDateStr(){ return todayStr(viewDate); }
+function isViewToday(){ return viewDateStr()===todayStr(); }
+function dowOfView(){ return DOW[viewDate.getDay()]; }
+function setHeader(){
+  $("#hChild").textContent = S.child.name+" · "+S.child.grade;
+  const d=viewDate;
+  const notToday=!isViewToday();
+  $("#hDate").innerHTML =
+    `${d.getMonth()+1}월 ${d.getDate()}일 <b>${dowOfView()}요일</b>`+
+    (notToday?` <span class="past-badge">과거 보기</span>`:``)+
+    ` <span class="cal-icon">📅</span>`;
+  $("#hDate").onclick=openCal;
+}
+
+/* ============ RENDER: 오늘 ============ */
+function vToday(){
+  const dow=dowOfView(), date=viewDateStr();
+  const tt=(S.week.days[dow]||[]);
+  const after=(S.after[dow]||[]);
+  const ev=S.events.filter(e=>e.date===date);
+  const preps=todayPreps(dow,tt,ev);
+  const doneSet=new Set(S.done[date]||[]);
+  const cur=isViewToday()?nowMin():-1;  // 지난날엔 '지금' 표시 없음
+
+  let h=`<div class="card"><div class="card-h"><h2><span class="em">🏫</span>오늘 학교</h2>
+    <span class="chip">${esc(dow)}요일</span></div><div class="card-b">`;
+  if(tt.length){ h+=`<div class="tl">`;
+    tt.forEach(x=>{ h+=`<div class="tl-item"><div class="tl-time">${x.p}교시</div>
+      <div class="tl-body"><div class="tl-head"><span class="tl-title">${esc(x.s)}</span></div>
+      <div class="tl-sub">${highlightStar(x.t)}</div></div></div>`; });
+    h+=`</div>`;
+  } else h+=`<div class="empty">시간표 정보가 없어요. ‘주간’ 탭에서 이번 주를 갱신하세요.</div>`;
+  h+=`</div></div>`;
+
+  // 이벤트
+  if(ev.length){
+    h+=`<div class="card"><div class="card-h"><h2><span class="em">📌</span>오늘 일정</h2></div><div class="card-b">`;
+    ev.forEach(e=>{ h+=`<div class="lrow"><div class="lr-main"><div class="lr-t">${esc(e.title)} ${e.check?'<span class="badge" style="background:var(--now)">확인</span>':''}</div>
+      <div class="lr-s">${esc(e.type)}${e.prep?' · 준비물: '+esc(e.prep):''}${e.n?' · '+esc(e.n):''}</div></div></div>`; });
+    h+=`</div></div>`;
+  }
+
+  // 방과후 타임라인
+  h+=`<div class="card"><div class="card-h"><h2><span class="em">🏃</span>오늘 방과후</h2></div><div class="card-b"><div class="tl">`;
+  if(after.length){
+    after.forEach((x,i)=>{
+      const sM=toMin(x.st), eM=toMin(x.et);
+      const isNow=sM!=null&&eM!=null&&cur>=sM&&cur<eM;
+      const id=dow+i+(x.st||x.et);
+      const done=doneSet.has(id);
+      h+=`<div class="tl-item ${isNow?'now':''} ${done?'done':''}">
+        <div class="chk ${done?'on':''}" data-done="${esc(id)}">✓</div>
+        <div class="tl-time">${esc(x.st||x.et)}${x.st&&x.et?`<span>${esc(x.et)}</span>`:''}</div>
+        <div class="tl-body"><div class="tl-head">
+          <span class="badge" style="background:${catColor(x.k).trim()||'#888'}">${esc(x.k)}</span>
+          <span class="tl-title">${esc(x.c)}</span>${isNow?'<span class="nowtag">지금</span>':''}</div>
+          ${x.pl?`<div class="tl-sub">${esc(x.pl)}</div>`:''}
+          ${x.pr&&x.pr.length?`<div class="tl-prep">${x.pr.map(p=>`<span class="p">${esc(p)}</span>`).join("")}</div>`:''}
+          ${x.n?`<div class="tl-sub" style="color:var(--now)">⚑ ${esc(x.n)}</div>`:''}
+        </div></div>`;
+    });
+  } else h+=`<div class="empty">${esc(dow)}요일 방과후 일정이 없어요.</div>`;
+  h+=`</div></div></div>`;
+
+  // 준비물
+  h+=`<div class="card"><div class="card-h"><h2><span class="em">🎒</span>오늘 준비물</h2></div><div class="card-b">`;
+  if(preps.length){
+    h+=`<ul class="check-list">`;
+    preps.forEach((p,i)=>{ const id="prep_"+date+"_"+i; const done=doneSet.has(id);
+      h+=`<li><div class="chk ${done?'on':''}" data-done="${id}">✓</div>
+        <div class="cl-txt ${done?'done2':''}">${esc(p.item)} <span class="m">${esc(p.why)}</span></div></li>`; });
+    h+=`</ul>`;
+  } else h+=`<div class="empty">자동으로 잡힌 준비물이 없어요.</div>`;
+  h+=`</div></div>`;
+
+  // 오늘 학습 (요일별 계획)
+  const plan=S.studyPlan[dow]||[];
+  h+=`<div class="card"><div class="card-h"><h2><span class="em">📚</span>오늘 학습</h2><span class="chip">${plan.length}개</span></div><div class="card-b">`;
+  if(plan.length){
+    plan.forEach(mid=>{ const m=S.materials.find(x=>x.id===mid); if(!m)return;
+      const tot=m.toc.length,dn=m.toc.filter(t=>t.done).length,pct=tot?Math.round(dn/tot*100):0;
+      h+=`<div class="lrow"><div class="lr-main"><div class="lr-t">${esc(m.name)}</div>
+        <div class="lr-s">${esc(m.subject)}${tot?` · ${dn}/${tot} (${pct}%)`:""}</div></div></div>`; });
+  } else h+=`<div class="empty">‘학습’ 탭에서 ${esc(dow)}요일 학습을 지정하세요.</div>`;
+  h+=`</div></div>`;
+
+  // 메시지 보내기
+  h+=`<button class="btn coral" style="width:100%;padding:14px;font-size:15px;margin-bottom:14px" onclick="composeMsg()">💬 은서에게 보낼 메시지 만들기</button>`;
+  return h;
+}
+function todayPreps(dow,tt,ev){
+  const out=[], seen=new Set();
+  const add=(item,why)=>{ const key=item.trim(); if(!key||seen.has(key))return; seen.add(key); out.push({item:key,why:why}); };
+  S.supplyRules.forEach(r=>{
+    let match=false, why="";
+    if(r.type==="요일"){ const ds=r.val.split(",").map(s=>s.trim()); if(ds.includes(dow)){match=true;why=r.n||"요일 준비물";} }
+    if(match) r.items.forEach(it=>add(it,why));
+  });
+  // 방과후 구분(과목/이벤트)에 따른 규칙
+  const after=(S.after[dow]||[]);
+  const kinds=new Set(after.map(a=>a.c+" "+a.k));
+  S.supplyRules.forEach(r=>{
+    if(r.type==="요일")return;
+    const hit=[...kinds].some(k=>k.includes(r.val))|| (S.events.some(e=>e.date===todayStr()&&(e.type.includes(r.val)||e.title.includes(r.val))));
+    if(hit) r.items.forEach(it=>add(it,(r.n||r.val)));
+  });
+  ev.forEach(e=>{ if(e.prep) e.prep.split(",").forEach(p=>add(p.trim(),e.title)); });
+  return out;
+}
+
+/* ============ RENDER: 주간 시간표 ============ */
+function vWeek(){
+  const dow=dowOf();
+  let h=`<div class="card"><div class="card-h"><h2><span class="em">📅</span>학교 시간표 <span class="chip">이번 주</span></h2>
+    <button class="btn sm" onclick="editWeekMeta()">정보 수정</button></div><div class="card-b">
+    <div class="tiny muted" style="margin-bottom:10px">${esc(S.week.label)}<br>${esc(S.week.note)}</div>`;
+  const days=["월","화","수","목","금"];
+  let maxP=6;
+  h+=`<table class="tt"><thead><tr><th style="width:24px"></th>`;
+  days.forEach(d=>h+=`<th class="${d===dow?'today':''}">${d}</th>`);
+  h+=`</tr></thead><tbody>`;
+  for(let p=1;p<=maxP;p++){
+    h+=`<tr><th>${p}</th>`;
+    days.forEach(d=>{ const cell=(S.week.days[d]||[]).find(x=>x.p===p);
+      h+=`<td class="${d===dow?'today':''}">${cell?`<span class="s">${esc(cell.s)}</span><span class="t">${highlightStar(cell.t)}</span>`:''}</td>`; });
+    h+=`</tr>`;
+  }
+  h+=`</tbody></table>
+    <button class="row-add" onclick="document.getElementById('pdfimp').click()">📄 주간학습 안내 PDF 올려서 채우기</button>
+    <input type="file" id="pdfimp" accept="application/pdf" style="display:none" onchange="importWeeklyPDF(this)">
+    <button class="row-add" onclick="editDay()">＋ 요일별 시간표 직접 편집</button>
+    <div class="tiny muted" style="margin-top:8px">매주 새 주간학습 안내를 올리면 이번 주 시간표로 갱신됩니다. PDF에서 뽑은 초안은 적용 전에 확인·수정합니다.</div>
+    </div></div>`;
+  return h;
+}
+
+/* ============ RENDER: 방과후 ============ */
+function vAfter(){
+  const dow=dowOf();
+  let h=`<div class="sec-eyebrow">요일을 눌러 방과후 일정을 보고 편집하세요</div>`;
+  h+=`<div style="display:flex;gap:6px;margin-bottom:12px">`;
+  ["월","화","수","목","금"].forEach(d=>{ h+=`<button class="btn sm ${d===(AF_DAY||dow)?'pri':''}" style="flex:1" onclick="AF_DAY='${d}';render()">${d}</button>`; });
+  h+=`</div>`;
+  const day=AF_DAY||dow;
+  const list=S.after[day]||[];
+  h+=`<div class="card"><div class="card-h"><h2><span class="em">🏃</span>${day}요일 방과후</h2></div><div class="card-b">`;
+  if(list.length){ h+=`<div class="tl">`;
+    list.forEach((x,i)=>{
+      h+=`<div class="tl-item"><div class="tl-time">${esc(x.st||x.et)}${x.st&&x.et?`<span>${esc(x.et)}</span>`:''}</div>
+        <div class="tl-body"><div class="tl-head">
+          <span class="badge" style="background:${catColor(x.k).trim()||'#888'}">${esc(x.k)}</span>
+          <span class="tl-title">${esc(x.c)}</span></div>
+          ${x.pl?`<div class="tl-sub">${esc(x.pl)}</div>`:''}
+          ${x.pr&&x.pr.length?`<div class="tl-prep">${x.pr.map(p=>`<span class="p">${esc(p)}</span>`).join("")}</div>`:''}
+          ${x.n?`<div class="tl-sub" style="color:var(--now)">⚑ ${esc(x.n)}</div>`:''}
+        </div>
+        <div class="lr-act"><button class="iconbtn" onclick="editAfter('${day}',${i})">✏️</button>
+        <button class="iconbtn" onclick="delItem(S.after['${day}'],${i})">🗑️</button></div></div>`;
+    }); h+=`</div>`;
+  } else h+=`<div class="empty">일정이 없어요.</div>`;
+  h+=`<button class="row-add" onclick="editAfter('${day}',-1)">＋ 일정 추가</button></div></div>`;
+  return h;
+}
+let AF_DAY=null;
+
+/* ============ RENDER: 학습 ============ */
+let STUDY_DAY=null;
+function vStudy(){
+  const day=STUDY_DAY||dowOf();
+  const plan=S.studyPlan[day]||[];
+  let h=`<div class="sec-eyebrow">요일별 학습 계획</div>`;
+  h+=`<div class="daybar">`+["월","화","수","목","금"].map(d=>`<button class="daybtn ${d===day?'on':''}" onclick="STUDY_DAY='${d}';renderView()">${d}</button>`).join("")+`</div>`;
+  // 선택 요일 계획
+  h+=`<div class="card"><div class="card-h"><h2><span class="em">📚</span>${day}요일 학습</h2><span class="chip">${plan.length}개</span></div><div class="card-b">`;
+  if(plan.length){
+    plan.forEach(mid=>{ const m=S.materials.find(x=>x.id===mid); if(!m)return;
+      const tot=m.toc.length,dn=m.toc.filter(t=>t.done).length,pct=tot?Math.round(dn/tot*100):0;
+      h+=`<div class="lrow"><div class="lr-main"><div class="lr-t">${esc(m.name)}</div>
+        <div class="lr-s">${esc(m.subject)} · ${tot?`${dn}/${tot} (${pct}%)`:"목차 없음"}</div></div>
+        <button class="iconbtn" data-plan="${day}|${mid}">✕</button></div>`; });
+  } else h+=`<div class="empty">${day}요일 학습으로 지정된 교재가 없어요.<br>아래 전체 교재에서 ‘＋${day}’을 눌러 추가하세요.</div>`;
+  h+=`</div></div>`;
+  // 전체 교재 · 진도
+  h+=`<div class="sec-eyebrow">전체 교재 · 진도 (＋${day}으로 이 요일에 넣기)</div>`;
+  S.materials.forEach(m=>{
+    const tot=m.toc.length, dn=m.toc.filter(t=>t.done).length, pct=tot?Math.round(dn/tot*100):0;
+    const inPlan=plan.includes(m.id), open=OPEN_MATS.has(m.id);
+    h+=`<div class="mat" data-mid="${m.id}"><div class="mat-h">
+      <div style="flex:1;min-width:0" onclick="toggleMat('${m.id}')"><div class="nm">${esc(m.name)} <span class="tiny muted">${esc(m.type)}·${esc(m.level||m.subject)}</span></div>
+        ${tot?`<div class="bar"><i style="width:${pct}%"></i></div>`:''}</div>
+      <div class="pct" onclick="toggleMat('${m.id}')">${tot?dn+"/"+tot+" · "+pct+"%":"목차 없음"}</div>
+      <button class="planbtn ${inPlan?'on':''}" data-plan="${day}|${m.id}">${inPlan?'✓ '+day:'＋'+day}</button></div>`;
+    if(tot){
+      h+=`<div class="toc ${open?'open':''}">`; let lastUnit="";
+      m.toc.forEach((t,i)=>{ const um=t.label.match(/^\[([^\]]+)\]/);
+        if(um&&um[1]!==lastUnit){lastUnit=um[1];h+=`<div class="unit-h">${esc(lastUnit)}</div>`;}
+        const lbl=t.label.replace(/^\[[^\]]+\]\s*/,"");
+        h+=`<div class="toc-it ${t.done?'d':''}"><div class="chk ${t.done?'on':''}" data-toc="${m.id}|${i}">✓</div>
+          <span class="lbl">${esc(lbl)}</span>${t.dt?`<span class="dt">${esc(t.dt)}</span>`:''}</div>`; });
+      h+=`</div>`;
+    }
+    h+=`</div>`;
+  });
+  h+=`<button class="row-add" onclick="editMat(-1)">＋ 교재·강좌 추가</button>`;
+  return h;
+}
+
+/* ============ RENDER: 핸드폰 ============ */
+function phoneDay(ds){
+  const es=S.phoneLog.filter(l=>l.date===ds);
+  let grant=0,used=0; es.forEach(e=>{ if(e.kind==="use")used+=(+e.min||0); else grant+=(+e.min||0); });
+  return {has:es.length>0,grant,used,left:grant-used,ok:used<=grant,entries:es};
+}
+function vPhone(){
+  const date=viewDateStr(), pd=phoneDay(date);
+  let h=`<div class="phero ${pd.left<0?'over':''}"><div><div class="phero-num">${pd.left}<span>분</span></div>
+    <div class="phero-lbl">오늘 남은 시간</div></div>
+    <div class="phero-sub"><div>부여 <b>${pd.grant}</b>분</div><div>사용 <b>${pd.used}</b>분</div></div></div>`;
+  // 사용 기준
+  h+=`<div class="card"><div class="card-h"><h2><span class="em">📏</span>사용 기준</h2><button class="btn sm" onclick="editPRule(-1)">＋ 추가</button></div><div class="card-b">`;
+  S.phoneRules.forEach((r,i)=>{ h+=`<div class="lrow"><div class="lr-main"><div class="lr-t">${esc(r.name)}</div><div class="lr-s">+${esc(r.min)}분 부여</div></div>
+    <div class="lr-act"><button class="btn sm pri" onclick="grantPhone(0,${i})">반영</button>
+    <button class="iconbtn" onclick="editPRule(${i})">✏️</button><button class="iconbtn" onclick="delItem(S.phoneRules,${i})">🗑️</button></div></div>`; });
+  h+=`</div></div>`;
+  // 보상 미션
+  h+=`<div class="card"><div class="card-h"><h2><span class="em">🎯</span>보상 미션 <span class="tiny muted" style="font-weight:600">완료하면 시간 부여</span></h2><button class="btn sm" onclick="editPMission(-1)">＋ 추가</button></div><div class="card-b">`;
+  if(S.phoneMissions.length){ S.phoneMissions.forEach((r,i)=>{ h+=`<div class="lrow"><div class="lr-main"><div class="lr-t">${esc(r.name)}</div><div class="lr-s">+${esc(r.min)}분</div></div>
+    <div class="lr-act"><button class="btn sm pri" onclick="grantPhone(1,${i})">반영</button>
+    <button class="iconbtn" onclick="editPMission(${i})">✏️</button><button class="iconbtn" onclick="delItem(S.phoneMissions,${i})">🗑️</button></div></div>`; });
+  } else h+=`<div class="empty">예: 큐티 완료 +15분, 영어 학습 완료 +20분</div>`;
+  h+=`</div></div>`;
+  // 오늘 기록
+  h+=`<div class="card"><div class="card-h"><h2><span class="em">⏱️</span>오늘 기록</h2><button class="btn sm coral" onclick="logUse()">－ 사용 입력</button></div><div class="card-b">`;
+  if(pd.entries.length){
+    [...pd.entries].reverse().forEach(e=>{ const gi=S.phoneLog.indexOf(e); const use=e.kind==="use";
+      h+=`<div class="led"><div style="flex:1"><div class="lr-t" style="font-size:13px">${use?'사용':'부여'} · ${esc(e.label||'')}</div></div>
+        <div class="amt ${use?'out':'in'}">${use?'−':'+'}${esc(e.min)}분</div>
+        <button class="iconbtn" onclick="delItem(S.phoneLog,${gi})">🗑️</button></div>`; });
+  } else h+=`<div class="empty">기준·미션의 ‘반영’으로 시간을 부여하고, ‘사용 입력’으로 실제 사용을 기록하세요.</div>`;
+  h+=`</div></div>`;
+  return h;
+}
+
+/* ============ RENDER: 용돈 ============ */
+function vMoney(){
+  const led=S.allowance.ledger;
+  const bal=led.reduce((a,l)=>a+(l.type==="수입"?+l.amount:-l.amount),0);
+  const missions=S.allowance.missions||[];
+  const upcoming=missions.filter(m=>!m.paid).reduce((a,m)=>a+(+m.amount||0),0);
+  let h=`<div class="bal"><div><div class="tiny muted">현재 잔액</div>${upcoming?`<div class="tiny" style="color:var(--accent);font-weight:700;margin-top:3px">받을 예정 ${upcoming.toLocaleString()}원</div>`:''}</div><div class="v">${bal.toLocaleString()}원</div></div>`;
+  // 지급 기준 + 지급
+  h+=`<div class="card"><div class="card-h"><h2><span class="em">💰</span>지급 기준</h2>
+    <div class="lr-act"><button class="btn sm pri" onclick="payAllowance()">＋ 지급</button><button class="btn sm" onclick="editAllowRules()">수정</button></div></div><div class="card-b">`;
+  Object.entries(S.allowance.rules).forEach(([k,v])=>h+=`<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`);
+  h+=`</div></div>`;
+  // 용돈 미션
+  h+=`<div class="card"><div class="card-h"><h2><span class="em">🎯</span>용돈 미션</h2><button class="btn sm" onclick="editMMission(-1)">＋ 추가</button></div><div class="card-b">`;
+  if(missions.length){ missions.forEach((m,i)=>{
+    h+=`<div class="lrow"><div class="lr-main"><div class="lr-t ${m.paid?'done2':''}">${esc(m.name)} <span class="amt in" style="font-size:13px">+${(+m.amount).toLocaleString()}</span></div>
+      <div class="lr-s">${m.due?'예정 '+esc(m.due)+' · ':''}${m.paid?'✅ 지급 완료':'대기 중'}</div></div>
+      <div class="lr-act">${m.paid?'':`<button class="btn sm pri" onclick="payMission(${i})">지급</button>`}
+      <button class="iconbtn" onclick="editMMission(${i})">✏️</button><button class="iconbtn" onclick="delItem(S.allowance.missions,${i})">🗑️</button></div></div>`; });
+  } else h+=`<div class="empty">예: 큐티 1회 +1,000원 · 6/30까지 5천원 이상 보유 시 +3,000원</div>`;
+  h+=`</div></div>`;
+  // 기록
+  h+=`<div class="card"><div class="card-h"><h2><span class="em">🧾</span>용돈 기록</h2>
+    <button class="btn sm pri" onclick="editLedger()">＋ 기록</button></div><div class="card-b">`;
+  if(led.length){
+    [...led].reverse().forEach((l,idx)=>{ const i=led.length-1-idx;
+      h+=`<div class="led"><div style="flex:1"><div class="lr-t" style="font-size:13px">${esc(l.category)} ${l.memo?`<span class="tiny muted">${esc(l.memo)}</span>`:''}</div>
+        <div class="lr-s">${esc(l.date)}</div></div>
+        <div class="amt ${l.type==="수입"?'in':'out'}">${l.type==="수입"?"+":"−"}${(+l.amount).toLocaleString()}</div>
+        <button class="iconbtn" onclick="delItem(S.allowance.ledger,${i})">🗑️</button></div>`; });
+  } else h+=`<div class="empty">기록이 없어요.</div>`;
+  h+=`</div></div>`;
+  return h;
+}
+
+/* ============ RENDER: 자료/설정 ============ */
+function vData(){
+  const synced = !!syncUrl;
+  let h=``;
+
+  // 서버 연동
+  h+=`<div class="card"><div class="card-h"><h2><span class="em">🔗</span>맥미니 서버 연동</h2>
+    <span id="syncDot" style="font-size:18px">${synced?"🟢":"⚪"}</span></div><div class="card-b">
+    <div class="tiny muted" style="margin-bottom:10px">연동하면 저장할 때마다 맥미니에 자동으로 올라가고, 알림 엔진(alert_tick)이 같은 데이터로 작동합니다.</div>
+    <div class="field"><label>맥미니 주소</label>
+      <input id="f_sync_url" value="${esc(syncUrl)}" placeholder="http://macmini-brain:8000"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn pri" onclick="syncTest()">연결 테스트</button>
+      ${synced?`<button class="btn" onclick="syncPull()">⬇ 서버에서 불러오기</button>
+               <button class="btn" onclick="syncPush()">⬆ 지금 서버에 올리기</button>
+               <button class="btn" onclick="clearSyncUrl()">연동 해제</button>`:''}
+    </div>
+    ${synced?`<div class="tiny muted" style="margin-top:8px">현재 연동 중: <b>${esc(syncUrl)}</b> · 저장할 때마다 자동 전송</div>`:''}
+    </div></div>`;
+
+  // 첨부 자료
+  h+=`<div class="card"><div class="card-h"><h2><span class="em">📎</span>첨부 자료</h2></div><div class="card-b">`;
+  S.attachments.forEach((a,i)=>{
+    h+=`<div class="lrow"><div class="lr-main"><div class="lr-t">${a.done?'✅ ':'⬜ '}${esc(a.title)}</div>
+      <div class="lr-s">${esc(a.domain)} · ${esc(a.fmt)} · 갱신 ${esc(a.cycle)} · ${esc(a.file)}</div></div>
+      <div class="lr-act"><button class="iconbtn" onclick="toggleAtt(${i})">${a.done?'↩️':'✔️'}</button></div></div>`;
+  });
+  h+=`</div></div>`;
+  h+=`<div class="card"><div class="card-h"><h2><span class="em">💾</span>백업 · 복원</h2></div><div class="card-b">
+    <div class="tiny muted" style="margin-bottom:10px">모든 데이터는 이 브라우저에 저장됩니다. 기기를 바꾸거나 백업하려면 내보내기를 쓰세요.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn pri" onclick="exportJSON()">JSON 내보내기</button>
+      <button class="btn" onclick="$('#imp').click()">JSON 불러오기</button>
+      <button class="btn" onclick="resetSeed()">샘플로 초기화</button>
+    </div><input type="file" id="imp" accept="application/json" style="display:none" onchange="importJSON(this)"></div></div>`;
+  h+=`<div class="tiny muted center" style="margin:10px 0 20px">은서 하루 · 단일 파일 웹앱 · 맥미니 연동으로 자동 알림</div>`;
+  return h;
+}
+
+/* ============ MAIN RENDER ============ */
+function paintView(){
+  const v={today:vToday,week:vWeek,after:vAfter,study:vStudy,phone:vPhone,money:vMoney,habit:vHabit,data:vData}[TAB];
+  $("#view").innerHTML=v();
+  bindDynamic();
+}
+function render(){                     // 탭 전환·편집 후: 맨 위로
+  setHeader();
+  paintView();
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.tab===TAB));
+  window.scrollTo(0,0);
+}
+function renderView(){ paintView(); }  // 데이터만 갱신: 스크롤 유지
+let OPEN_MATS=new Set();
+function toggleMat(mid){
+  if(OPEN_MATS.has(mid))OPEN_MATS.delete(mid); else OPEN_MATS.add(mid);
+  const t=document.querySelector(`.mat[data-mid="${mid}"] .toc`); if(t)t.classList.toggle("open");
+}
+function go(tab){ closeSheet(); TAB=tab; AF_DAY=null; render(); }
+function bindDynamic(){
+  // 완료 체크 (오늘 방과후·준비물) — 제자리 토글, 스크롤 유지
+  document.querySelectorAll("[data-done]").forEach(el=>el.onclick=()=>{
+    const id=el.dataset.done, date=viewDateStr();
+    if(!S.done[date])S.done[date]=[];
+    const arr=S.done[date], k=arr.indexOf(id), on=k<0;
+    if(k>=0)arr.splice(k,1); else arr.push(id);
+    save();
+    el.classList.toggle("on",on);
+    const item=el.closest(".tl-item"); if(item)item.classList.toggle("done",on);
+    const cl=el.parentNode.querySelector(".cl-txt"); if(cl)cl.classList.toggle("done2",on);
+  });
+  // 학습 진도 — 제자리 토글 + 진도바 갱신 (목차 펼침 유지)
+  document.querySelectorAll("[data-toc]").forEach(el=>el.onclick=()=>{
+    const[mid,i]=el.dataset.toc.split("|"); const m=S.materials.find(x=>x.id===mid);
+    const t=m.toc[+i]; t.done=!t.done; t.dt=t.done?todayStr():""; save();
+    el.classList.toggle("on",t.done);
+    const it=el.closest(".toc-it"); if(it){
+      it.classList.toggle("d",t.done);
+      let dtv=it.querySelector(".dt");
+      if(t.done){ if(!dtv){dtv=document.createElement("span");dtv.className="dt";it.appendChild(dtv);} dtv.textContent=t.dt; }
+      else if(dtv){ dtv.remove(); }
+    }
+    const mat=el.closest(".mat");
+    if(mat){ const tot=m.toc.length,dn=m.toc.filter(x=>x.done).length,pct=tot?Math.round(dn/tot*100):0;
+      const bar=mat.querySelector(".bar i"); if(bar)bar.style.width=pct+"%";
+      const pc=mat.querySelector(".pct"); if(pc)pc.textContent=dn+"/"+tot+" · "+pct+"%"; }
+  });
+  // 요일별 학습 계획 토글
+  document.querySelectorAll("[data-plan]").forEach(el=>el.onclick=()=>{
+    const[day,mid]=el.dataset.plan.split("|");
+    if(!S.studyPlan[day])S.studyPlan[day]=[];
+    const arr=S.studyPlan[day], k=arr.indexOf(mid);
+    if(k>=0)arr.splice(k,1); else arr.push(mid);
+    save(); renderView();
+  });
+}
+
+/* ============ NAV ============ */
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{TAB=b.dataset.tab;AF_DAY=null;render();});
+
+/* ============ MODAL / EDIT ============ */
+const scrim=$("#scrim"), sheet=$("#sheet");
+function openSheet(html){sheet.innerHTML=html;scrim.classList.add("on");}
+function closeSheet(){scrim.classList.remove("on");}
+scrim.onclick=e=>{if(e.target===scrim)closeSheet();};
+function fieldVal(id){return $("#"+id).value.trim();}
+
+function delItem(arr,i){ if(confirm("삭제할까요?")){arr.splice(i,1);save();render();} }
+function toggleAtt(i){ S.attachments[i].done=!S.attachments[i].done; save(); render(); }
+
+// 방과후 편집
+function editAfter(day,i){
+  const x=i<0?{st:"",et:"",k:"학원",c:"",pl:"",pr:[],n:""}:S.after[day][i];
+  const cats=["학교","하교","휴식","이동","학원","스터디카페","개인학습","저녁식사"];
+  openSheet(`<h3>${i<0?day+'요일 일정 추가':'일정 수정'}<span class="x" onclick="closeSheet()">×</span></h3>
+    <div class="f2"><div class="field"><label>시작</label><input id="f_st" value="${esc(x.st)}" placeholder="15:00"></div>
+      <div class="field"><label>종료</label><input id="f_et" value="${esc(x.et)}" placeholder="16:30"></div></div>
+    <div class="field"><label>구분</label><select id="f_k">${cats.map(c=>`<option ${c===x.k?'selected':''}>${c}</option>`).join("")}</select></div>
+    <div class="field"><label>내용</label><input id="f_c" value="${esc(x.c)}"></div>
+    <div class="field"><label>장소</label><input id="f_pl" value="${esc(x.pl)}"></div>
+    <div class="field"><label>준비물 (쉼표로 구분)</label><input id="f_pr" value="${esc((x.pr||[]).join(", "))}"></div>
+    <div class="field"><label>비고</label><input id="f_n" value="${esc(x.n)}"></div>
+    <div class="sheet-act"><button class="btn" onclick="closeSheet()">취소</button>
+      <button class="btn pri" onclick="saveAfter('${day}',${i})">저장</button></div>`);
+}
+function saveAfter(day,i){
+  const o={st:fieldVal("f_st"),et:fieldVal("f_et"),k:$("#f_k").value,c:fieldVal("f_c"),pl:fieldVal("f_pl"),
+    pr:fieldVal("f_pr").split(",").map(s=>s.trim()).filter(Boolean),n:fieldVal("f_n")};
+  if(i<0)S.after[day].push(o); else S.after[day][i]=o;
+  S.after[day].sort((a,b)=>(toMin(a.st||a.et)||0)-(toMin(b.st||b.et)||0));
+  save();closeSheet();render();
+}
+
+// 주간 시간표 편집(요일 단위, 텍스트)
+function editDay(){
+  const days=["월","화","수","목","금"];
+  openSheet(`<h3>요일별 시간표 편집<span class="x" onclick="closeSheet()">×</span></h3>
+    <div class="field"><label>요일</label><select id="f_day" onchange="loadDayText()">${days.map(d=>`<option>${d}</option>`).join("")}</select></div>
+    <div class="field"><label>교시별 과목·내용 (한 줄에 하나: <b>과목 | 내용</b>)</label>
+      <textarea id="f_txt" style="min-height:160px"></textarea></div>
+    <div class="tiny muted">예) 수학 | 띠그래프와 원그래프 해석</div>
+    <div class="sheet-act"><button class="btn" onclick="closeSheet()">취소</button>
+      <button class="btn pri" onclick="saveDay()">저장</button></div>`);
+  loadDayText();
+}
+function loadDayText(){
+  const d=$("#f_day").value;
+  $("#f_txt").value=(S.week.days[d]||[]).map(x=>`${x.s} | ${x.t}`).join("\n");
+}
+function saveDay(){
+  const d=$("#f_day").value;
+  S.week.days[d]=$("#f_txt").value.split("\n").map(l=>l.trim()).filter(Boolean).map((l,i)=>{
+    const[s,t]=l.split("|"); return{p:i+1,s:(s||"").trim(),t:(t||"").trim()};
+  });
+  save();closeSheet();render();
+}
+function editWeekMeta(){
+  openSheet(`<h3>주차 정보 수정<span class="x" onclick="closeSheet()">×</span></h3>
+    <div class="field"><label>주차 라벨</label><input id="f_lbl" value="${esc(S.week.label)}"></div>
+    <div class="field"><label>안내</label><textarea id="f_note">${esc(S.week.note)}</textarea></div>
+    <div class="sheet-act"><button class="btn" onclick="closeSheet()">취소</button>
+      <button class="btn pri" onclick="S.week.label=fieldVal('f_lbl');S.week.note=fieldVal('f_note');save();closeSheet();render()">저장</button></div>`);
+}
+
+// 교재 편집
+function editMat(i){
+  const m=i<0?{name:"",subject:"수학",type:"문제집",level:"",tocText:""}:S.materials[i];
+  const tocText=i<0?"":m.toc.map(t=>t.label).join("\n");
+  openSheet(`<h3>${i<0?'교재 추가':'교재 수정'}<span class="x" onclick="closeSheet()">×</span></h3>
+    <div class="field"><label>교재·강좌명</label><input id="f_nm" value="${esc(m.name)}"></div>
+    <div class="f2"><div class="field"><label>과목</label><input id="f_sub" value="${esc(m.subject||'')}"></div>
+      <div class="field"><label>종류</label><select id="f_ty">${["문제집","인강","학원교재","학습지","기타"].map(t=>`<option ${t===m.type?'selected':''}>${t}</option>`).join("")}</select></div></div>
+    <div class="field"><label>학년·수준</label><input id="f_lv" value="${esc(m.level||'')}"></div>
+    <div class="field"><label>목차 (한 줄에 하나, 단원은 [1단원] 접두어 가능)</label><textarea id="f_toc" style="min-height:120px">${esc(tocText)}</textarea></div>
+    <div class="sheet-act">${i>=0?`<button class="btn" onclick="delItem(S.materials,${i});closeSheet()">삭제</button>`:''}
+      <button class="btn pri" onclick="saveMat(${i})">저장</button></div>`);
+}
+function saveMat(i){
+  const lines=$("#f_toc").value.split("\n").map(l=>l.trim()).filter(Boolean);
+  const old=i<0?[]:S.materials[i].toc;
+  const toc=lines.map(l=>{const ex=old.find(t=>t.label===l);return ex?ex:{label:l,done:false};});
+  const o={id:i<0?"m_"+Date.now():S.materials[i].id,name:fieldVal("f_nm"),subject:fieldVal("f_sub"),
+    type:$("#f_ty").value,level:fieldVal("f_lv"),toc};
+  if(i<0)S.materials.push(o); else S.materials[i]=o;
+  save();closeSheet();render();
+}
+
+// 핸드폰: 기준·미션·부여·사용
+function editPRule(i){ phoneItemForm("phoneRules",i,"사용 기준"); }
+function editPMission(i){ phoneItemForm("phoneMissions",i,"보상 미션"); }
+function phoneItemForm(key,i,title){
+  const r=i<0?{name:"",min:15}:S[key][i];
+  openSheet(`<h3>${i<0?title+' 추가':title+' 수정'}<span class="x" onclick="closeSheet()">×</span></h3>
+    <div class="field"><label>내용</label><input id="f_nm" value="${esc(r.name)}" placeholder="예: 큐티 완료"></div>
+    <div class="field"><label>부여 시간(분)</label><input id="f_min" type="number" value="${esc(r.min)}"></div>
+    <div class="sheet-act"><button class="btn" onclick="closeSheet()">취소</button>
+      <button class="btn pri" onclick="savePhoneItem('${key}',${i})">저장</button></div>`);
+}
+function savePhoneItem(key,i){
+  const o={name:fieldVal("f_nm"),min:+fieldVal("f_min")||0};
+  if(i<0)S[key].push(o); else S[key][i]=o;
+  save();closeSheet();render();
+}
+function grantPhone(kind,i){            // kind 0=기준, 1=미션
+  const r=(kind?S.phoneMissions:S.phoneRules)[i]; if(!r)return;
+  S.phoneLog.push({date:todayStr(),kind:"grant",label:r.name,min:+r.min||0});
+  save(); if(TAB==="phone")renderView(); toast("+"+r.min+"분 부여 · "+r.name);
+}
+function logUse(){
+  openSheet(`<h3>핸드폰 사용 입력<span class="x" onclick="closeSheet()">×</span></h3>
+    <div class="field"><label>날짜</label><input id="f_dt" type="date" value="${todayStr()}"></div>
+    <div class="field"><label>사용 시간(분)</label><input id="f_min" type="number" placeholder="20"></div>
+    <div class="field"><label>메모</label><input id="f_lb" placeholder="(선택) 예: 유튜브"></div>
+    <div class="sheet-act"><button class="btn" onclick="closeSheet()">취소</button>
+      <button class="btn pri" onclick="S.phoneLog.push({date:fieldVal('f_dt'),kind:'use',label:fieldVal('f_lb')||'사용',min:+fieldVal('f_min')||0});save();closeSheet();render()">저장</button></div>`);
+}
+// 용돈: 지급·미션
+function payAllowance(){
+  const amt=(S.allowance.rules["정기 지급액"]||"").replace(/[^0-9]/g,"");
+  openSheet(`<h3>용돈 지급<span class="x" onclick="closeSheet()">×</span></h3>
+    <div class="field"><label>지급 날짜</label><input id="f_dt" type="date" value="${todayStr()}"></div>
+    <div class="field"><label>금액(원)</label><input id="f_amt" type="number" value="${amt}"></div>
+    <div class="field"><label>메모</label><input id="f_memo" value="정기 용돈"></div>
+    <div class="sheet-act"><button class="btn" onclick="closeSheet()">취소</button>
+      <button class="btn pri" onclick="S.allowance.ledger.push({date:fieldVal('f_dt'),type:'수입',category:'정기 용돈',amount:+fieldVal('f_amt')||0,memo:fieldVal('f_memo')});save();closeSheet();render()">지급</button></div>`);
+}
+function editMMission(i){
+  const m=i<0?{name:"",amount:1000,due:"",paid:false}:S.allowance.missions[i];
+  openSheet(`<h3>${i<0?'용돈 미션 추가':'미션 수정'}<span class="x" onclick="closeSheet()">×</span></h3>
+    <div class="field"><label>미션 내용</label><input id="f_nm" value="${esc(m.name)}" placeholder="예: 큐티 1회"></div>
+    <div class="f2"><div class="field"><label>금액(원)</label><input id="f_amt" type="number" value="${esc(m.amount)}"></div>
+      <div class="field"><label>예정 날짜</label><input id="f_due" type="date" value="${esc(m.due||'')}"></div></div>
+    <div class="sheet-act"><button class="btn" onclick="closeSheet()">취소</button>
+      <button class="btn pri" onclick="saveMMission(${i})">저장</button></div>`);
+}
+function saveMMission(i){
+  const o={name:fieldVal("f_nm"),amount:+fieldVal("f_amt")||0,due:fieldVal("f_due"),paid:i<0?false:S.allowance.missions[i].paid};
+  if(i<0)S.allowance.missions.push(o); else S.allowance.missions[i]=o;
+  save();closeSheet();render();
+}
+function payMission(i){
+  const m=S.allowance.missions[i]; if(!m)return;
+  S.allowance.ledger.push({date:todayStr(),type:"수입",category:"미션 보상",amount:+m.amount||0,memo:m.name});
+  m.paid=true; save(); render(); toast("지급 완료 · +"+(+m.amount).toLocaleString()+"원");
+}
+
+// 용돈
+function editLedger(){
+  const cats=[...S.allowance.income.map(c=>["수입",c]),...S.allowance.expense.map(c=>["지출",c])];
+  openSheet(`<h3>용돈 기록<span class="x" onclick="closeSheet()">×</span></h3>
+    <div class="field"><label>날짜</label><input id="f_dt" type="date" value="${todayStr()}"></div>
+    <div class="field"><label>항목</label><select id="f_cat">${cats.map(([t,c])=>`<option value="${t}|${c}">[${t}] ${c}</option>`).join("")}</select></div>
+    <div class="field"><label>금액(원)</label><input id="f_amt" type="number" placeholder="3000"></div>
+    <div class="field"><label>메모</label><input id="f_memo" placeholder="(선택)"></div>
+    <div class="sheet-act"><button class="btn" onclick="closeSheet()">취소</button>
+      <button class="btn pri" onclick="saveLedger()">저장</button></div>`);
+}
+function saveLedger(){
+  const[type,category]=$("#f_cat").value.split("|");
+  S.allowance.ledger.push({date:fieldVal("f_dt"),type,category,amount:+fieldVal("f_amt")||0,memo:fieldVal("f_memo")});
+  save();closeSheet();render();
+}
+function editAllowRules(){
+  const r=S.allowance.rules;
+  openSheet(`<h3>지급 기준 수정<span class="x" onclick="closeSheet()">×</span></h3>
+    ${Object.keys(r).map((k,i)=>`<div class="field"><label>${esc(k)}</label><input id="f_r${i}" value="${esc(r[k])}"></div>`).join("")}
+    <div class="sheet-act"><button class="btn" onclick="closeSheet()">취소</button>
+      <button class="btn pri" onclick="saveAllowRules()">저장</button></div>`);
+}
+function saveAllowRules(){
+  Object.keys(S.allowance.rules).forEach((k,i)=>S.allowance.rules[k]=fieldVal("f_r"+i));
+  save();closeSheet();render();
+}
+
+/* ============ 메시지 만들기 ============ */
+function composeMsg(){
+  const dow=dowOfView(), date=viewDateStr(), d=viewDate;
+  const tt=S.week.days[dow]||[], after=S.after[dow]||[], ev=S.events.filter(e=>e.date===date);
+  const preps=todayPreps(dow,tt,ev);
+  let m=`📋 ${d.getMonth()+1}월 ${d.getDate()}일 (${dow}) 은서 일정\n`;
+  if(tt.length) m+=`\n🏫 학교: ${tt.map(x=>x.s).join(", ")}`;
+  if(ev.length) m+=`\n📌 일정: ${ev.map(e=>e.title).join(" / ")}`;
+  if(preps.length) m+=`\n🎒 준비물: ${preps.map(p=>p.item).join(", ")}`;
+  const key=after.filter(x=>["학원","스터디카페","개인학습"].includes(x.k));
+  if(key.length){ m+=`\n\n⏰ 방과후`; key.forEach(x=>m+=`\n · ${x.st||x.et} ${x.c}`); }
+  m+=`\n\n오늘도 화이팅! 💪`;
+  openSheet(`<h3>은서에게 보낼 메시지<span class="x" onclick="closeSheet()">×</span></h3>
+    <div class="msgbox" id="msgbox">${esc(m)}</div>
+    <div class="sheet-act"><button class="btn" onclick="closeSheet()">닫기</button>
+      <button class="btn coral" onclick="copyMsg()">복사하기</button></div>
+    <div class="tiny muted center" style="margin-top:8px">복사 후 카카오톡·문자에 붙여넣어 보내세요</div>`);
+  window._msg=m;
+}
+function copyMsg(){
+  const t=window._msg||"";
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t).then(()=>{closeSheet();toast("복사됐어요 — 카카오톡에 붙여넣으세요");},()=>fallbackCopy(t));
+  } else fallbackCopy(t);
+}
+function fallbackCopy(t){
+  const ta=document.createElement("textarea");ta.value=t;document.body.appendChild(ta);ta.select();
+  try{document.execCommand("copy");closeSheet();toast("복사됐어요");}catch(e){toast("복사 실패 — 길게 눌러 복사하세요");}
+  document.body.removeChild(ta);
+}
+
+/* ============ 백업/복원 ============ */
+function exportJSON(){
+  const blob=new Blob([JSON.stringify(S,null,2)],{type:"application/json"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download=`은서하루_백업_${todayStr()}.json`;a.click();toast("내보냈어요");
+}
+function importJSON(inp){
+  const f=inp.files[0];if(!f)return;const r=new FileReader();
+  r.onload=()=>{try{S=JSON.parse(r.result);normalize();save();render();toast("불러왔어요");}
+    catch(e){toast("파일을 읽을 수 없어요");}};
+  r.readAsText(f);inp.value="";
+}
+function resetSeed(){ if(confirm("입력한 내용을 지우고 샘플 데이터로 되돌릴까요?")){S=clone(SEED);normalize();save();render();toast("초기화했어요");} }
+
+/* ===== 주간학습 안내 PDF 가져오기 (브라우저 자체 처리, AI 없음) ===== */
+function ensurePdfJs(){return new Promise((res,rej)=>{
+  if(window.pdfjsLib){res();return;}
+  const s=document.createElement("script");
+  s.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+  s.onload=()=>{try{pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";}catch(e){}res();};
+  s.onerror=()=>rej(new Error("pdfjs load fail"));document.head.appendChild(s);});}
+
+async function importWeeklyPDF(inp){
+  const f=inp.files[0];if(!f)return;inp.value="";
+  toast("PDF 읽는 중…");
+  try{
+    await ensurePdfJs();
+    const buf=await f.arrayBuffer();
+    const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+    const page=await pdf.getPage(1);
+    const tc=await page.getTextContent();
+    const items=tc.items.map(it=>({s:(it.str||"").replace(/\s+/g," ").trim(),x:it.transform[4],y:it.transform[5]})).filter(i=>i.s);
+    let draft="";try{draft=serializeDays(parseWeekly(items));}catch(e){console.error(e);}
+    const raw=items.slice().sort((a,b)=>b.y-a.y||a.x-b.x).map(i=>i.s).join(" ");
+    showImportConfirm(draft,raw);
+  }catch(e){console.error(e);toast("PDF를 읽지 못했어요 — 직접 편집을 이용하세요");}
+}
+const SUBJ=["국어","수학","영어","과학","사회","도덕","음악","미술","체육","실과","진로","자율","창체","동아리","보건","한문","정보","스포츠"];
+function parseWeekly(items){
+  const days=["월","화","수","목","금"];
+  const prep=items.find(i=>i.s.replace(/\s/g,"")==="준비물");
+  const floorY=prep?prep.y+8:-1e9;                        // 시간표 하단 경계(준비물 행)
+  let anchors=items.filter(i=>i.y>floorY&&/^[1-7]?\s*교시$/.test(i.s)).map(i=>i.y);
+  anchors=[...new Set(anchors.map(y=>Math.round(y)))].sort((a,b)=>b-a).slice(0,7);
+  if(anchors.length<3)throw new Error("교시 인식 실패");
+  const colX={};                                          // 요일 헤더 행(y 723 근처)만
+  days.forEach(d=>{const c=items.filter(i=>i.y>715&&i.y<735&&i.s.replace(/\s/g,"")===d);if(c.length)colX[d]=c[0].x;});
+  if(Object.keys(colX).length<5){                         // 헤더 못 찾으면 과목 x-범위로 추정
+    const sx=items.filter(i=>SUBJ.includes(i.s.replace(/\s/g,""))&&i.y>floorY).map(i=>i.x);
+    if(sx.length){const mn=Math.min(...sx),mx=Math.max(...sx);days.forEach((d,k)=>{if(colX[d]==null)colX[d]=mn+(mx-mn)*k/4;});}
+  }
+  const centers=days.map(d=>colX[d]).filter(x=>x!=null);
+  if(centers.length<2)throw new Error("요일 열 인식 실패");
+  const bounds=[];for(let i=0;i<centers.length-1;i++)bounds.push((centers[i]+centers[i+1])/2);
+  const colOf=x=>{if(x<110)return -1;let i=0;while(i<bounds.length&&x>=bounds[i])i++;return i;};
+  const bandOf=y=>{for(let i=0;i<anchors.length;i++){const top=i===0?anchors[i]+45:(anchors[i-1]+anchors[i])/2;
+    const bot=i===anchors.length-1?Math.max(anchors[i]-45,floorY):(anchors[i]+anchors[i+1])/2;
+    if(y<=top&&y>bot)return i+1;}return 0;};
+  const grid={};days.forEach(d=>grid[d]={});
+  items.forEach(it=>{if(it.y<=floorY)return;if(/교시$/.test(it.s))return;
+    const c=colOf(it.x),p=bandOf(it.y);if(c<0||p<1)return;
+    (grid[days[c]][p]=grid[days[c]][p]||[]).push(it);});
+  const out={"월":[],"화":[],"수":[],"목":[],"금":[]};
+  days.forEach(d=>{
+    for(let p=1;p<=anchors.length;p++){
+      const cell=(grid[d][p]||[]).sort((a,b)=>b.y-a.y||a.x-b.x);if(!cell.length)continue;
+      const topY=cell[0].y;
+      const head=cell.filter(i=>Math.abs(i.y-topY)<=6).sort((a,b)=>a.x-b.x).map(i=>i.s).join("").replace(/\s/g,"");
+      const subj=SUBJ.find(s=>head.startsWith(s))||head;   // 과목: 윗줄 글자 이어붙여 사전 매칭
+      const topic=cell.filter(i=>i.y<topY-6&&!/^\(?\d+[-–]?\d*/.test(i.s.replace(/\s/g,""))&&i.s!=="쪽")
+        .map(i=>i.s).join(" ").replace(/★\s*학습으로의\s*평가/g,"★평가").replace(/\s+/g," ").trim();
+      out[d].push({p,s:subj,t:topic});
+    }
+  });
+  return out;
+}
+function serializeDays(days){
+  return ["월","화","수","목","금"].map(d=>`[${d}]\n`+(days[d]||[]).sort((a,b)=>a.p-b.p).map(x=>`${x.s} | ${x.t||""}`).join("\n")).join("\n\n");
+}
+function showImportConfirm(draft,raw){
+  openSheet(`<h3>주간학습 안내에서 채우기<span class="x" onclick="closeSheet()">×</span></h3>
+    <div class="tiny muted" style="margin-bottom:10px">PDF에서 뽑은 <b>초안</b>입니다. 빈칸·오인식을 고친 뒤 적용하세요.<br>형식: <b>[요일]</b> 줄 아래에 한 줄씩 <b>과목 | 내용</b></div>
+    <div class="field"><textarea id="f_imp" style="min-height:240px;font-size:13px;line-height:1.5">${esc(draft||"[월]\n\n[화]\n\n[수]\n\n[목]\n\n[금]\n")}</textarea></div>
+    <details style="margin-bottom:12px"><summary class="tiny muted">추출된 원본 텍스트 보기 (참고용)</summary>
+      <div class="msgbox" style="max-height:28vh;margin-top:8px;font-size:11.5px">${esc(raw||"(없음)")}</div></details>
+    <div class="sheet-act"><button class="btn" onclick="closeSheet()">취소</button>
+      <button class="btn pri" onclick="applyImport()">이 시간표로 교체</button></div>`);
+}
+function applyImport(){
+  const txt=$("#f_imp").value;const days={"월":[],"화":[],"수":[],"목":[],"금":[]};let cur=null;
+  txt.split("\n").forEach(line=>{
+    const m=line.match(/^\s*\[([월화수목금])\]/);if(m){cur=m[1];return;}
+    if(!cur||!line.trim())return;
+    const parts=line.split("|");const subj=(parts[0]||"").trim();if(!subj)return;
+    days[cur].push({p:days[cur].length+1,s:subj,t:(parts[1]||"").trim()});
+  });
+  S.week.days=days;save();closeSheet();render();toast("시간표를 교체했어요");
+}
+
+/* ============ 습관·기록 ============ */
+function weekDates(){
+  const d=new Date(); const off=(d.getDay()+6)%7;          // 월=0
+  const mon=new Date(d); mon.setDate(d.getDate()-off); mon.setHours(0,0,0,0);
+  const out=[]; for(let x=new Date(mon); x<=d; x.setDate(x.getDate()+1)) out.push(new Date(x));
+  return out;
+}
+function lastNDates(n){const out=[];for(let k=n-1;k>=0;k--){const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-k);out.push(d);}return out;}
+function sameDay(a,b){return a.toDateString()===b.toDateString();}
+function weekRangeLabel(){const wk=weekDates();const f=wk[0],l=wk[wk.length-1];return `${f.getMonth()+1}/${f.getDate()} ~ ${l.getMonth()+1}/${l.getDate()}`;}
+function inWeek(ds){const wk=weekDates();return ds>=todayStr(wk[0])&&ds<=todayStr(wk[wk.length-1]);}
+function habitMatch(h,x){
+  if(h.cat && x.k!==h.cat) return false;
+  if(h.cats && !h.cats.includes(x.k)) return false;
+  if(h.match && !((x.c||"").includes(h.match))) return false;
+  return !!(h.cat||h.cats||h.match);
+}
+function afterStatus(h,date){
+  const W=DOW[date.getDay()], list=S.after[W]||[], idxs=[];
+  list.forEach((x,i)=>{ if(habitMatch(h,x)) idxs.push({x,i}); });
+  if(!idxs.length) return {applicable:false,done:false};
+  const arr=S.done[todayStr(date)]||[];
+  return {applicable:true, done:idxs.some(({x,i})=>arr.includes(W+i+(x.st||x.et)))};
+}
+function streakAfter(h){
+  let s=0;
+  for(let k=0;k<120;k++){
+    const d=new Date(); d.setDate(d.getDate()-k);
+    const r=afterStatus(h,d);
+    if(!r.applicable) continue;
+    if(r.done) s++;
+    else if(k===0) continue;            // 오늘은 아직 진행 중일 수 있어 끊지 않음
+    else break;
+  }
+  return s;
+}
+function phoneWeek(days){
+  let logged=0, ok=0;
+  const dots=days.map(d=>{ const r=phoneDay(todayStr(d));
+    if(!r.has) return "na"; logged++; if(r.ok)ok++; return r.ok?"on":"bad"; });
+  return {dots,logged,ok};
+}
+function vHabit(){
+  const dow=dowOfView(), date=viewDateStr();
+  const after=S.after[dow]||[], doneSet=new Set(S.done[date]||[]);
+  const meaningful=after.filter(x=>["학원","스터디카페","개인학습","저녁식사"].includes(x.k));
+  let aDone=0; meaningful.forEach(x=>{ const i=after.indexOf(x); if(doneSet.has(dow+i+(x.st||x.et)))aDone++; });
+  const aTot=meaningful.length;
+  const plan=S.studyPlan[dow]||[];
+  const pd=phoneDay(date);
+  const bal=S.allowance.ledger.reduce((a,l)=>a+(l.type==="수입"?+l.amount:-l.amount),0);
+  const wk=weekDates(); const afterH=S.habits.filter(h=>h.kind==="after");
+  let appl=0,don=0; afterH.forEach(h=>wk.forEach(d=>{const r=afterStatus(h,d);if(r.applicable){appl++;if(r.done)don++;}}));
+  const rate=appl?Math.round(don/appl*100):0;
+
+  const tiles=[
+    {k:"after",icon:"🏃",val:aTot?`${aDone}/${aTot}`:"–",label:"오늘 방과후",sub:"수행"},
+    {k:"study",icon:"📚",val:plan.length?`${plan.length}`:"–",label:"오늘 학습",sub:"과제 수행"},
+    {k:"phone",icon:"📱",val:pd.has?`${pd.left}분`:"–",label:"핸드폰",sub:"남은 시간"},
+    {k:"money",icon:"💰",val:`${bal.toLocaleString()}`,label:"용돈",sub:"잔액(원)"},
+    {k:"week",icon:"🔥",val:`${rate}%`,label:"주간 수행률",sub:"연속·추세"},
+    {k:"review",icon:"📝",val:"›",label:"이번 주 리뷰",sub:"요약 만들기"}
+  ];
+  let h=`<div class="sec-eyebrow">${esc(dow)}요일 · ${date.slice(5)} 한눈에 보기</div>`;
+  h+=`<div class="tiles">`;
+  tiles.forEach(t=>{ h+=`<button class="tile" onclick="habitTile('${t.k}')">
+    <div class="tile-top"><span class="tile-ic">${t.icon}</span><span class="tile-go">↗</span></div>
+    <div class="tile-val">${t.val}</div><div class="tile-lbl">${t.label}</div><div class="tile-sub">${t.sub}</div></button>`; });
+  h+=`</div>`;
+  h+=`<div class="tiny muted center" style="margin:14px 0 18px">타일을 누르면 요약을, ↗ 메뉴로 이동할 수 있어요</div>`;
+  return h;
+}
+function habitTile(k){
+  if(k==="review") return weekReview();
+  if(k==="week")   return habitWeekSheet();
+  const dow=dowOfView(), date=viewDateStr();
+  let title="",body="",dest="";
+  if(k==="after"){ dest="today"; title="오늘 방과후 수행";
+    const after=S.after[dow]||[], ds=new Set(S.done[date]||[]);
+    const rows=after.filter(x=>["학원","스터디카페","개인학습","저녁식사"].includes(x.k));
+    body=rows.length? rows.map(x=>{const i=after.indexOf(x);const on=ds.has(dow+i+(x.st||x.et));
+      return `<div class="srow"><span>${on?'✅':'⬜'} ${esc(x.st||x.et)} ${esc(x.c)}</span></div>`;}).join("")
+      : `<div class="empty">오늘 방과후 일정이 없어요.</div>`;
+  } else if(k==="study"){ dest="study"; title="오늘 학습";
+    const plan=S.studyPlan[dow]||[];
+    body=plan.length? plan.map(mid=>{const m=S.materials.find(x=>x.id===mid);if(!m)return"";
+      const tot=m.toc.length,dn=m.toc.filter(t=>t.done).length,pct=tot?Math.round(dn/tot*100):0;
+      return `<div class="srow"><span>${esc(m.name)}</span><b>${tot?pct+'%':'–'}</b></div>`;}).join("")
+      : `<div class="empty">${esc(dow)}요일 학습이 지정되지 않았어요.</div>`;
+  } else if(k==="phone"){ dest="phone"; title="핸드폰 사용";
+    const pd=phoneDay(date);
+    body=`<div class="srow"><span>부여</span><b>${pd.grant}분</b></div>
+      <div class="srow"><span>사용</span><b>${pd.used}분</b></div>
+      <div class="srow"><span>남은 시간</span><b style="color:${pd.left<0?'var(--now)':'var(--accent)'}">${pd.left}분</b></div>`;
+  } else if(k==="money"){ dest="money"; title="용돈";
+    const led=S.allowance.ledger, bal=led.reduce((a,l)=>a+(l.type==="수입"?+l.amount:-l.amount),0);
+    const inWk=led.filter(l=>inWeek(l.date));
+    const inc=inWk.filter(l=>l.type==="수입").reduce((a,l)=>a+ +l.amount,0);
+    const exp=inWk.filter(l=>l.type==="지출").reduce((a,l)=>a+ +l.amount,0);
+    const up=(S.allowance.missions||[]).filter(m=>!m.paid).reduce((a,m)=>a+ +m.amount,0);
+    body=`<div class="srow"><span>현재 잔액</span><b>${bal.toLocaleString()}원</b></div>
+      <div class="srow"><span>이번 주 수입</span><b class="amt in">+${inc.toLocaleString()}</b></div>
+      <div class="srow"><span>이번 주 지출</span><b class="amt out">−${exp.toLocaleString()}</b></div>
+      ${up?`<div class="srow"><span>받을 예정(미션)</span><b style="color:var(--accent)">${up.toLocaleString()}원</b></div>`:''}`;
+  }
+  openSheet(`<h3>${title}<span class="x" onclick="closeSheet()">×</span></h3>
+    <div class="sheet-list">${body}</div>
+    <div class="sheet-act"><button class="btn" onclick="closeSheet()">닫기</button>
+      <button class="btn pri" onclick="go('${dest}')">${title} 메뉴로 →</button></div>`);
+}
+function habitWeekSheet(){
+  const wk=weekDates(); const afterH=S.habits.filter(h=>h.kind==="after");
+  let appl=0,don=0; afterH.forEach(h=>wk.forEach(d=>{const r=afterStatus(h,d);if(r.applicable){appl++;if(r.done)don++;}}));
+  const rate=appl?Math.round(don/appl*100):0;
+  let b=`<div class="hhero"><div><div class="hhero-num">${rate}%</div><div class="hhero-lbl">이번 주 수행률</div></div>
+    <div class="hhero-r"><div class="tiny muted">완료 ${don}/${appl}</div><div class="tiny muted" style="margin-top:3px">${weekRangeLabel()}</div></div></div>`;
+  b+=`<div class="sec-eyebrow">매일 챙기는 루틴</div>`;
+  afterH.forEach(hb=>{ const st=streakAfter(hb); let aw=0,dw=0;
+    const dots=wk.map(d=>{const r=afterStatus(hb,d);if(!r.applicable)return "na";aw++;if(r.done){dw++;return "on";}return sameDay(d,new Date())?"today":"off";});
+    b+=`<div class="hcard"><div class="hcard-h"><span class="hicon">${hb.icon}</span><span class="hname">${esc(hb.name)}</span>
+      <span class="hstreak">${st>0?"🔥 "+st+"일 연속":"—"}</span></div>
+      <div class="hdots">${dots.map(c=>`<span class="hd ${c}"></span>`).join("")}</div>
+      <div class="tiny muted">이번 주 ${dw}/${aw}일${aw===0?" · 해당 일정 없음":""}</div></div>`; });
+  b+=`<div class="sec-eyebrow">학습 진도</div>`;
+  S.habits.filter(h=>h.kind==="study").forEach(hb=>{ const m=S.materials.find(x=>x.id===hb.mid); if(!m)return;
+    const tot=m.toc.length,dn=m.toc.filter(t=>t.done).length,pct=tot?Math.round(dn/tot*100):0;
+    const wkn=m.toc.filter(t=>t.done&&t.dt&&inWeek(t.dt)).length;
+    b+=`<div class="hcard"><div class="hcard-h"><span class="hicon">${hb.icon}</span><span class="hname">${esc(hb.name)}</span>
+      <span class="hstreak" style="color:var(--accent)">${dn}/${tot}강</span></div>
+      <div class="bar" style="margin:9px 0 6px"><i style="width:${pct}%"></i></div>
+      <div class="tiny muted">전체 ${pct}% · 이번 주 ${wkn}강</div></div>`; });
+  const ph=S.habits.find(h=>h.kind==="phone");
+  if(ph){ const {dots,logged,ok}=phoneWeek(lastNDates(7));
+    b+=`<div class="sec-eyebrow">핸드폰 기준 · 최근 7일</div>
+      <div class="hcard"><div class="hcard-h"><span class="hicon">📱</span><span class="hname">${esc(ph.name)}</span>
+        <span class="hstreak" style="color:var(--accent)">${logged?ok+"/"+logged+"일":"—"}</span></div>
+      <div class="hdots">${dots.map(c=>`<span class="hd ${c}"></span>`).join("")}</div>
+      <div class="tiny muted">사용 ≤ 부여인 날${logged===0?" · 기록 없음":""}</div></div>`; }
+  openSheet(`<h3>주간 수행 현황<span class="x" onclick="closeSheet()">×</span></h3>${b}
+    <div class="sheet-act"><button class="btn" onclick="closeSheet()">닫기</button>
+      <button class="btn coral" onclick="weekReview()">📝 리뷰 요약</button></div>`);
+}
+function weekReview(){
+  const wk=weekDates();
+  const lines=[`📝 은서 이번 주 돌아보기 (${weekRangeLabel()})`,""];
+  S.habits.filter(h=>h.kind==="after").forEach(hb=>{
+    let a=0,d=0; wk.forEach(dt=>{const r=afterStatus(hb,dt);if(r.applicable){a++;if(r.done)d++;}});
+    if(a){const st=streakAfter(hb); lines.push(`${hb.icon} ${hb.name}: ${d}/${a}일${st>0?` (연속 ${st}일)`:""}`);}
+  });
+  S.habits.filter(h=>h.kind==="study").forEach(hb=>{
+    const m=S.materials.find(x=>x.id===hb.mid); if(!m)return;
+    const wkn=m.toc.filter(t=>t.done&&t.dt&&inWeek(t.dt)).length, dn=m.toc.filter(t=>t.done).length;
+    lines.push(`${hb.icon} ${hb.name}: 이번 주 ${wkn}강 (누적 ${dn}/${m.toc.length})`);
+  });
+  const ph=S.habits.find(h=>h.kind==="phone");
+  if(ph){const {logged,ok}=phoneWeek(lastNDates(7)); if(logged) lines.push(`📱 핸드폰 기준 준수: 최근 7일 중 ${ok}/${logged}일`);}
+  lines.push("","잘한 점 먼저 칭찬하고, 다음 주 목표 하나만 같이 정해보기 👍");
+  const m=lines.join("\n");
+  openSheet(`<h3>이번 주 리뷰 요약<span class="x" onclick="closeSheet()">×</span></h3>
+    <div class="msgbox">${esc(m)}</div>
+    <div class="sheet-act"><button class="btn" onclick="closeSheet()">닫기</button>
+      <button class="btn coral" onclick="copyMsg()">복사하기</button></div>
+    <div class="tiny muted center" style="margin-top:8px">은서와 함께 보거나, 메신저로 공유하세요</div>`);
+  window._msg=m;
+}
+
+/* ============ 날짜 달력 ============ */
+function openCal(){
+  CAL_MONTH=new Date(viewDate); CAL_MONTH.setDate(1);
+  scrim.classList.add("on"); _paintCal();
+}
+function _paintCal(){
+  const y=CAL_MONTH.getFullYear(), mo=CAL_MONTH.getMonth();
+  const label=`${y}년 ${mo+1}월`;
+  const today=todayStr(), sel=viewDateStr();
+  // 이달에 데이터 있는 날 집합
+  const dataDots=new Set([
+    ...Object.keys(S.done),
+    ...S.phoneLog.map(e=>e.date),
+    ...S.allowance.ledger.map(e=>e.date)
+  ]);
+  // 달력 첫날~마지막날
+  const first=new Date(y,mo,1), last=new Date(y,mo+1,0);
+  let startDow=(first.getDay()+6)%7; // 월=0
+  const rows=[];
+  let day=1-startDow;
+  while(day<=last.getDate()){
+    const week=[];
+    for(let i=0;i<7;i++,day++){
+      if(day<1||day>last.getDate()){week.push(null);}
+      else {
+        const ds=`${y}-${String(mo+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+        week.push({day,ds,isToday:ds===today,isSel:ds===sel,hasDot:dataDots.has(ds),future:ds>today});
+      }
+    }
+    rows.push(week);
+  }
+  const heads=["월","화","수","목","금","토","일"];
+  let h=`<h3 style="justify-content:space-between;align-items:center;display:flex;margin-bottom:14px">
+    <button class="iconbtn" style="font-size:20px" onclick="_calMonth(-1)">‹</button>
+    <span style="font-size:16px;font-weight:800">${label}</span>
+    <button class="iconbtn" style="font-size:20px" onclick="_calMonth(1)">›</button>
+    <span class="x" style="margin-left:12px" onclick="closeSheet()">×</span></h3>`;
+  // 헤더 행
+  h+=`<table class="cal-grid"><thead><tr>`;
+  heads.forEach((d,i)=>h+=`<th class="${i>=5?'cal-wkend':''}">${d}</th>`);
+  h+=`</tr></thead><tbody>`;
+  rows.forEach(week=>{
+    h+=`<tr>`;
+    week.forEach((c,i)=>{
+      if(!c){h+=`<td></td>`;return;}
+      const cls=['cal-cell',c.isToday?'cal-today':'',c.isSel?'cal-sel':'',i>=5?'cal-wkend':'',c.future?'cal-future':''].filter(Boolean).join(' ');
+      h+=`<td class="${cls}" onclick="pickDate('${c.ds}')">${c.day}${c.hasDot?'<span class="cal-dot"></span>':''}</td>`;
+    });
+    h+=`</tr>`;
+  });
+  h+=`</tbody></table>`;
+  // 오늘로 돌아가기
+  if(!isViewToday()) h+=`<button class="btn pri" style="width:100%;padding:12px;margin-top:14px" onclick="pickDate('${today}')">📅 오늘로 돌아가기</button>`;
+  else h+=`<div class="tiny muted center" style="margin-top:14px">오늘 날짜를 보고 있어요</div>`;
+  sheet.innerHTML=h;
+}
+function _calMonth(dir){
+  CAL_MONTH.setMonth(CAL_MONTH.getMonth()+dir);
+  if(CAL_MONTH.getMonth()===new Date().getMonth()&&CAL_MONTH.getFullYear()===new Date().getFullYear()) CAL_MONTH.setDate(1);
+  _paintCal();
+}
+function pickDate(ds){
+  viewDate=new Date(ds+"T00:00:00"); closeSheet(); render();
+}
+
+/* ============ START ============ */
+render();
+</script>
+</body>
+</html>
