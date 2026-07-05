@@ -379,6 +379,24 @@ function useCloud(dbRef, applyMerged){
       if(!(window.google&&google.accounts&&google.accounts.oauth2)){ if(tries++<40){ setTimeout(init,300); } return; }
       tcRef.current=google.accounts.oauth2.initTokenClient({client_id:CLOUD.CLIENT_ID,scope:CLOUD.SCOPE,callback:()=>{}});
       setState(s=>({...s,status:"signedout"}));
+      // 앱 시작 시 자동 pull: fileId 있으면 로그인 팝업 자동 실행 → 확인 후 드라이브 최신 데이터 반영
+      if(getFileId()){
+        setState(s=>({...s,status:"syncing",msg:"드라이브에서 최신 데이터를 불러옵니다. 로그인 창을 확인해주세요…"}));
+        requestToken("auto").then(tk=>{
+          const id=getFileId(); if(!id) return;
+          tokRef.current={tok:tk,exp:Date.now()+3400000};
+          return driveDownload(tk,id).then(remote=>{
+            if(!remote) return;
+            const local=dbRef.current||{};
+            const base=loadBase();
+            const merged=mergeDB(base,local,remote);
+            saveBase(merged); applyMerged(merged);
+            setState(s=>({...s,status:"synced",lastSync:Date.now(),msg:null}));
+          });
+        }).catch(()=>{
+          setState(s=>({...s,status:"signedout",msg:"로그인을 취소했습니다. 동기화 버튼으로 다시 시도하세요."}));
+        });
+      }
     })();
     const onFocus=()=>{ if(tokRef.current) doSync(false); };
     window.addEventListener("focus",onFocus);
@@ -389,7 +407,7 @@ function useCloud(dbRef, applyMerged){
     return new Promise((res,rej)=>{
       const tc=tcRef.current; if(!tc){ rej(new Error("로그인 모듈 준비 중")); return; }
       tc.callback=(resp)=>{ if(resp&&resp.access_token){ tokRef.current={tok:resp.access_token,exp:Date.now()+((resp.expires_in||3500)*1000)}; res(resp.access_token); } else rej(new Error("로그인이 취소되었습니다")); };
-      try{ tc.requestAccessToken({prompt: interactive?"consent":""}); }catch(e){ rej(e); }
+      try{ tc.requestAccessToken({prompt: interactive==="consent"?"consent": interactive==="auto"?"select_account":""}); }catch(e){ rej(e); }
     });
   }
   async function token(interactive){
