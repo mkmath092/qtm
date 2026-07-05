@@ -1388,7 +1388,33 @@ function pickDate(ds){
 }
 
 /* ============ START ============ */
-render();
+async function autoSync(){
+  if(!syncUrl){ render(); return; }
+  try{
+    const r=await fetch(syncUrl+"/state",{signal:AbortSignal.timeout(6000)});
+    if(r.ok){
+      const fresh=await r.json();
+      // 서버 데이터가 로컬보다 최신인지 확인 (done 기록 개수로 비교)
+      const localKeys=Object.keys(S.done||{}).length;
+      const freshKeys=Object.keys(fresh.done||{}).length;
+      // 서버 데이터를 기본으로 쓰되, 로컬에만 있는 오늘 체크 기록은 병합
+      const todayStr=(()=>{const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");})();
+      const localToday=S.done?.[todayStr]||[];
+      S=fresh; normalize();
+      // 오늘 로컬 체크가 있고 서버에 없으면 병합 (오늘 것만)
+      if(localToday.length&&!(S.done[todayStr]||[]).length){
+        S.done[todayStr]=localToday;
+      }
+      localStorage.setItem(KEY,JSON.stringify(S));
+      toast("서버 데이터로 시작해요 ✓");
+    }
+  }catch(e){
+    // 서버 연결 실패 시 로컬 데이터로 조용히 시작
+    console.warn("[autoSync] 서버 연결 안 됨, 로컬 데이터 사용:",e.message);
+  }
+  render();
+}
+autoSync();
 </script>
 </body>
 </html>
