@@ -227,6 +227,45 @@ const CLOUD = {
 // Picker가 drive.file 권한으로 선택 파일에 접근하려면 GCP 프로젝트 번호(appId)가 필요 → CLIENT_ID 앞부분에서 추출
 function gcpAppId(){ return (CLOUD.CLIENT_ID||"").split("-")[0]; }
 
+/* ===================== 서버 백엔드 (Apps Script + Google Sheets) =====================
+ * 앱의 유일한 원본 저장소. 앱 시작 시 서버에서 전체 DB를 받아 시작하고,
+ * 변경분은 디바운스 후 서버로 저장. 여러 기기 동시 사용은 rev 번호 + 3-way 병합으로 처리.
+ * localStorage는 오프라인 폴백 캐시로만 사용.
+ * ▼ 설정: Apps Script 웹앱 배포 URL(/exec)을 붙여넣으세요 (설치 가이드 참고) */
+const SERVER = {
+  URL: "https://script.google.com/a/macros/goedu.kr/s/AKfycbyMqabYFoQKP5OHlurDSPL5D526EWBR7gXjHJWTZFB-MfAtgKKZ1S2BNKw9zY5GNxo/exec",
+};
+const serverCfgOk = ()=> !!SERVER.URL;
+const SRV_TOKEN_KEY = "eduapp_server_token_v1";
+function getServerToken(){ try{ return localStorage.getItem(SRV_TOKEN_KEY)||""; }catch(e){ return ""; } }
+function setServerToken(t){ try{ t? localStorage.setItem(SRV_TOKEN_KEY,t) : localStorage.removeItem(SRV_TOKEN_KEY); }catch(e){} }
+function deviceName(){
+  const k="eduapp_device_v1";
+  try{
+    let d=localStorage.getItem(k);
+    if(!d){ d="기기-"+Math.random().toString(36).slice(2,7); localStorage.setItem(k,d); }
+    return d;
+  }catch(e){ return "기기"; }
+}
+// Apps Script 웹앱 호출. Content-Type을 text/plain으로 보내 CORS preflight를 회피(Apps Script는 OPTIONS 미지원).
+async function serverCall(payload, timeoutMs){
+  const ctrl = new AbortController();
+  const timer = setTimeout(()=>ctrl.abort(), timeoutMs||45000);
+  try{
+    const r = await fetch(SERVER.URL, {
+      method:"POST",
+      headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body: JSON.stringify({token:getServerToken(), device:deviceName(), ...payload}),
+      signal: ctrl.signal,
+    });
+    if(!r.ok) throw new Error("서버 응답 오류("+r.status+")");
+    return await r.json();
+  }catch(e){
+    if(e && e.name==="AbortError") throw new Error("서버 응답 시간 초과");
+    throw e;
+  }finally{ clearTimeout(timer); }
+}
+
 /* ---------- 구글 Picker 로더 + CSV 파서 (학습지 제출 연동용) ---------- */
 let _pickerLoading=null;
 function loadPicker(){
@@ -367,24 +406,33 @@ async function driveUpload(token,id,obj){
   return true;
 }
 
-/* ----- 동기화 컨트롤러 (React 훅) ----- */
-function useCloud(dbRef, applyMerged){
-  const [state,setState]=useState(()=>({status: cloudCfgOk()? (httpsOk()?"signedout":"needhost") : "local", lastSync:null, msg:null}));
-  const tcRef=useRef(null), tokRef=useRef(null), busyRef=useRef(false), pendRef=useRef(false), timerRef=useRef(null);
+/* ----- 동기화 컨트롤러 (React 훅) — Apps Script + Sheets 백엔드 -----
+ * boot: {rev: 앱 시작 시 받은 서버 rev, offline: 오프라인(로컬 캐시) 모드 여부}
+ * 저장 흐름: 변경 → 3초 디바운스 → save(baseRev 포함) → 충돌 시 서버본과 3-way 병합 후 재시도(최대 3회)
+ * 포커스 복귀 시: 서버 rev 확인 → 다르면 pull + 병합 → 내 변경분 있으면 다시 push
+ */
+function useCloud(dbRef, applyMerged, boot){
+  const offline = !!(boot&&boot.offline);
+  const [state,setState]=useState(()=>({
+    status: !serverCfgOk()? "local" : (offline? "offline" : "synced"),
+    lastSync: (!serverCfgOk()||offline)? null : Date.now(),
+    msg:null
+  }));
+  const revRef=useRef((boot&&boot.rev)||0);
+  const busyRef=useRef(false), pendRef=useRef(false), timerRef=useRef(null);
+  const tcRef=useRef(null), tokRef=useRef(null); // 구글 OAuth(학습지 제출 Picker 전용 — 서버 동기화와 별개)
 
+  const syncOn = ()=> serverCfgOk() && !offline;
+
+  /* --- 구글 OAuth 토큰 (학습지 제출용 Picker/CSV) --- */
   useEffect(()=>{
     if(!cloudCfgOk()||!httpsOk()) return;
     let tries=0;
     (function init(){
       if(!(window.google&&google.accounts&&google.accounts.oauth2)){ if(tries++<40){ setTimeout(init,300); } return; }
       tcRef.current=google.accounts.oauth2.initTokenClient({client_id:CLOUD.CLIENT_ID,scope:CLOUD.SCOPE,callback:()=>{}});
-      setState(s=>({...s,status:"signedout"}));
     })();
-    const onFocus=()=>{ if(tokRef.current) doSync(false); };
-    window.addEventListener("focus",onFocus);
-    return ()=>window.removeEventListener("focus",onFocus);
   },[]);
-
   function requestToken(interactive){
     return new Promise((res,rej)=>{
       const tc=tcRef.current; if(!tc){ rej(new Error("로그인 모듈 준비 중")); return; }
@@ -397,43 +445,86 @@ function useCloud(dbRef, applyMerged){
     if(t&&t.tok&&Date.now()<t.exp-60000) return t.tok;
     return await requestToken(!!interactive);
   }
-  async function doSync(interactive){
-    if(!cloudCfgOk()||!httpsOk()) return;
+
+  /* --- 서버로 저장 (충돌 시 병합-재시도) --- */
+  async function doPush(){
+    if(!syncOn()) return;
     if(busyRef.current){ pendRef.current=true; return; }
     busyRef.current=true; setState(s=>({...s,status:"syncing",msg:null}));
     try{
-      const tk=await token(interactive);
-      let id=getFileId();
-      let remote=null;
-      if(id){ remote=await driveDownload(tk,id); if(remote===null){ id=null; setFileId(null); } }
-      if(!id){ id=await driveFind(tk); if(id){ remote=await driveDownload(tk,id); } }
-      const local=dbRef.current||{};
-      const base=loadBase();
-      const merged=mergeDB(base,local,remote||{});
-      if(!id){ id=await driveCreate(tk,merged); }
-      else{ await driveUpload(tk,id,merged); }
-      setFileId(id); saveBase(merged); applyMerged(merged);
+      let attempt=0;
+      for(;;){
+        const res=await serverCall({action:"save", baseRev:revRef.current, db:dbRef.current});
+        if(res.ok){ revRef.current=res.rev; saveBase(dbRef.current); break; }
+        if(res.code==="conflict" && attempt<3){
+          // 다른 기기가 먼저 저장 → 서버본과 3-way 병합 후 새 rev 기준으로 재시도
+          const merged=mergeDB(loadBase(), dbRef.current, res.db||{});
+          revRef.current=res.rev;
+          dbRef.current=merged;      // 루프 내 즉시 반영
+          applyMerged(merged);        // 화면 반영
+          attempt++; continue;
+        }
+        if(res.code==="busy" && attempt<3){ await new Promise(r=>setTimeout(r,1500)); attempt++; continue; }
+        throw new Error(res.msg||res.code||"저장 실패");
+      }
       setState(s=>({...s,status:"synced",lastSync:Date.now(),msg:null}));
     }catch(e){
       setState(s=>({...s,status:"error",msg:String(e&&e.message||e)}));
     }finally{
       busyRef.current=false;
-      if(pendRef.current){ pendRef.current=false; setTimeout(()=>doSync(false),60); }
+      if(pendRef.current){ pendRef.current=false; setTimeout(doPush,150); }
     }
   }
-  function signIn(){ doSync(true); }
-  function signOut(){
-    const t=tokRef.current;
-    if(t&&t.tok&&window.google&&google.accounts&&google.accounts.oauth2){ try{ google.accounts.oauth2.revoke(t.tok,()=>{}); }catch(e){} }
-    tokRef.current=null; setState(s=>({...s,status:"signedout",lastSync:null,msg:null}));
+
+  /* --- 서버에서 당겨오기 (포커스 복귀·수동 동기화) --- */
+  async function doPull(){
+    if(!syncOn()) return;
+    if(busyRef.current){ pendRef.current=true; return; }
+    busyRef.current=true; setState(s=>({...s,status:"syncing",msg:null}));
+    let needPush=false;
+    try{
+      const res=await serverCall({action:"load"});
+      if(!res.ok) throw new Error(res.msg||res.code||"불러오기 실패");
+      if(res.rev!==revRef.current && !res.empty){
+        const merged=mergeDB(loadBase(), dbRef.current, res.db);
+        revRef.current=res.rev;
+        dbRef.current=merged;
+        applyMerged(merged);
+        saveBase(res.db); // base = 서버가 알고 있는 상태
+        // 병합 결과에 내 로컬 변경이 남아 있으면 서버로 밀어올림
+        if(JSON.stringify(merged)!==JSON.stringify(res.db)) needPush=true;
+      }
+      setState(s=>({...s,status:"synced",lastSync:Date.now(),msg:null}));
+    }catch(e){
+      setState(s=>({...s,status:"error",msg:String(e&&e.message||e)}));
+    }finally{
+      busyRef.current=false;
+      if(needPush) setTimeout(doPush,150);
+      else if(pendRef.current){ pendRef.current=false; setTimeout(doPush,150); }
+    }
   }
+
+  // 다른 기기에서 작업하고 돌아왔을 때 자동으로 최신본 확인
+  useEffect(()=>{
+    if(!syncOn()) return;
+    let last=0;
+    const onFocus=()=>{ const now=Date.now(); if(now-last<5000) return; last=now; doPull(); };
+    window.addEventListener("focus",onFocus);
+    document.addEventListener("visibilitychange",()=>{ if(!document.hidden) onFocus(); });
+    return ()=>window.removeEventListener("focus",onFocus);
+  },[]);
+
   function schedulePush(){
-    if(!cloudCfgOk()||!httpsOk()) return;
-    if(!tokRef.current) return; // 로그인 전엔 푸시 안 함
+    if(!syncOn()) return;
     clearTimeout(timerRef.current);
-    timerRef.current=setTimeout(()=>doSync(false),2500);
+    timerRef.current=setTimeout(doPush,3000);
   }
-  return {state,signIn,signOut,syncNow:()=>doSync(false),schedulePush,getToken:(i)=>token(i)};
+  function signOut(){
+    if(!confirm("서버 접속을 해제할까요?\n이 기기에 저장된 접속 비밀번호가 지워지고 접속 화면으로 돌아갑니다.\n(서버의 데이터는 그대로 유지됩니다)")) return;
+    setServerToken(null);
+    window.location.reload();
+  }
+  return {state, signIn:()=>doPull(), signOut, syncNow:()=>doPull(), schedulePush, getToken:(i)=>token(i), getRev:()=>revRef.current};
 }
 
 /* ---------- 실제 명단 (풍덕고 · 이명규 선생님) ---------- */
@@ -1072,32 +1163,26 @@ function attendanceCounts(students, rec){ const su=attendanceSummary(students,re
 /* ============================ APP ============================ */
 /* ---------- 클라우드 동기화 상태 표시 ---------- */
 function CloudStatus({cloud, compact}){
-  const {state,signIn,signOut,syncNow}=cloud;
+  const {state,signOut,syncNow}=cloud;
+  if(state.status==="local") return null; // 서버 미설정(개발 모드)
   const t = state.lastSync ? new Date(state.lastSync).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"}) : null;
 
-  if(state.status==="local"){
-    if(compact) return null;
-    return <span title="CLIENT_ID를 넣고 https로 호스팅하면 기기 간 동기화가 켜집니다" style={{display:"inline-flex",alignItems:"center",gap:6}}>
-      <span className="dot" style={{background:"var(--ink-3)"}}></span> 이 기기에만 저장 (클라우드 미설정)
-    </span>;
-  }
-  if(state.status==="needhost"){
-    if(compact) return null;
-    return <span style={{display:"inline-flex",alignItems:"center",gap:6,color:"#b5701a"}}>
-      <span className="dot" style={{background:"#b5701a"}}></span> https 주소에서 열어야 동기화됩니다 (file:// 불가)
+  if(state.status==="offline"){
+    return <span style={{display:"inline-flex",alignItems:"center",gap:6,color:"#b5701a",fontSize:compact?11:12}}>
+      <span className="dot" style={{background:"#b5701a"}}></span> 오프라인 · 이 기기에만 저장 중
     </span>;
   }
   const dotColor = state.status==="synced"?"var(--good)":state.status==="syncing"?"#2563a8":state.status==="error"?"#a8392f":"var(--ink-3)";
-  const label = state.status==="syncing"?"동기화 중…":state.status==="synced"?(t?`동기화됨 · ${t}`:"동기화됨"):state.status==="error"?"동기화 실패":"동기화 꺼짐";
+  const label = state.status==="syncing"?"서버 저장 중…":state.status==="synced"?(t?`서버 동기화됨 · ${t}`:"서버 동기화됨"):state.status==="error"?"동기화 실패":"대기";
   const pulse = state.status==="syncing"?"pulse 1s infinite":"none";
 
   if(compact){
     return (
       <div style={{display:"inline-flex",alignItems:"center",gap:7}}>
         <span className="dot" style={{background:dotColor,animation:pulse}}></span>
-        {state.status==="signedout"
-          ? <button className="btn ghost sm" onClick={signIn}>☁ 동기화 로그인</button>
-          : <button className="btn ghost sm" onClick={syncNow} disabled={state.status==="syncing"} title={state.msg||""}>{state.status==="syncing"?"동기화 중…":"↻ 동기화"}</button>}
+        <button className="btn ghost sm" onClick={syncNow} disabled={state.status==="syncing"} title={state.msg||label}>
+          {state.status==="syncing"?"저장 중…":"↻ 동기화"}
+        </button>
       </div>
     );
   }
@@ -1109,21 +1194,16 @@ function CloudStatus({cloud, compact}){
       </div>
       {state.status==="error" && state.msg && <div style={{fontSize:10.5,color:"#a8392f",wordBreak:"break-all"}}>{state.msg}</div>}
       <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-        {state.status==="signedout"
-          ? <button className="btn primary sm" onClick={signIn}>☁ 구글로 동기화 시작</button>
-          : <>
-              <button className="btn ghost sm" onClick={syncNow} disabled={state.status==="syncing"}>↻ 지금 동기화</button>
-              <button className="btn ghost sm" onClick={signOut}>로그아웃</button>
-            </>}
+        <button className="btn ghost sm" onClick={syncNow} disabled={state.status==="syncing"}>↻ 지금 동기화</button>
+        <button className="btn ghost sm" onClick={signOut}>서버 로그아웃</button>
       </div>
-      <div style={{fontSize:10,color:"var(--ink-3)"}}>내 드라이브의 파일 1개에 보관 · 기기 간 자동 합침</div>
+      <div style={{fontSize:10,color:"var(--ink-3)"}}>구글 시트에 저장 · 여러 기기 자동 병합</div>
     </div>
   );
 }
 
-function App(){
-  const [db,setDb]=useState(()=> {
-    const loaded = loadDB();
+/* DB 스키마 마이그레이션 (서버·로컬 어디서 왔든 최신 스키마로 보정) */
+function migrateDB(loaded){
     if(!loaded) { const s=seedDB(); s._v=DB_VERSION; return s; }
     const seed = seedDB();
     // v2 미만(샘플 3반 명단)에서 올라온 경우: 실제 명단으로 교체
@@ -1160,7 +1240,10 @@ function App(){
     }
     loaded._v = DB_VERSION;
     return loaded;
-  });
+}
+
+function App({initialDb, initialRev, offline}){
+  const [db,setDb]=useState(initialDb);
   const [view,setView]=useState("dashboard");
   const [navOpen,setNavOpen]=useState(false);
   const [sem,setSem]=useState(ACTIVE_SEM);
@@ -1170,20 +1253,36 @@ function App(){
   // 클라우드 동기화: db를 ref로 추적하고, 병합 결과를 안전하게 반영(동일하면 리렌더 생략 → 루프 방지)
   const dbRef=useRef(db); useEffect(()=>{ dbRef.current=db; },[db]);
   function applyMerged(merged){ setDb(prev=> JSON.stringify(prev)===JSON.stringify(merged)? prev : merged); }
-  const cloud=useCloud(dbRef, applyMerged);
+  const cloud=useCloud(dbRef, applyMerged, {rev:initialRev||0, offline});
 
   const saveTimer=useRef(null);
+  const firstRender=useRef(true);
+  const dirtyRef=useRef(false); // 서버 미전송 변경 존재 여부
   useEffect(()=>{
+    if(firstRender.current){ firstRender.current=false; return; } // 부팅 직후엔 저장·푸시 불필요
+    dirtyRef.current=true;
     clearTimeout(saveTimer.current);
     saveTimer.current=setTimeout(()=>saveDB(dbRef.current),500); // 타이핑 중 매번 전체 직렬화 방지
     cloud.schedulePush();
     return ()=>clearTimeout(saveTimer.current);
   },[db]);
   useEffect(()=>{
-    const flush=()=>saveDB(dbRef.current); // 탭 숨김·종료 시 즉시 저장
+    if(cloud.state.status==="synced") dirtyRef.current=false;
+  },[cloud.state.status, cloud.state.lastSync]);
+  useEffect(()=>{
+    const flush=()=>{
+      saveDB(dbRef.current); // 탭 숨김·종료 시 즉시 로컬 저장
+      // 종료 직전 미전송 변경이 있으면 서버로 최선 노력 전송 (응답은 못 받지만 다음 부팅 시 서버에서 다시 로드됨)
+      if(dirtyRef.current && serverCfgOk() && !offline){
+        try{
+          const payload=JSON.stringify({token:getServerToken(),device:deviceName(),action:"save",baseRev:cloud.getRev(),db:dbRef.current});
+          navigator.sendBeacon && navigator.sendBeacon(SERVER.URL, new Blob([payload],{type:"text/plain;charset=utf-8"}));
+        }catch(e){}
+      }
+    };
     window.addEventListener("beforeunload",flush);
-    document.addEventListener("visibilitychange",flush);
-    return ()=>{ window.removeEventListener("beforeunload",flush); document.removeEventListener("visibilitychange",flush); };
+    document.addEventListener("visibilitychange",()=>{ if(document.hidden) flush(); });
+    return ()=>{ window.removeEventListener("beforeunload",flush); };
   },[]);
 
   // 변경분만 새로 만드는 구조 공유 업데이트(Immer). 미로드 시 전체 깊은 복제로 폴백.
@@ -5568,16 +5667,12 @@ function BackupManager({db,update}){
       try{
         const data=JSON.parse(ev.target.result);
         if(!data.students||!data.classInfo){ setRestoreStatus("❌ 유효하지 않은 백업 파일입니다."); return; }
-        if(!confirm(`백업 파일(${data._exported||"날짜미상"})으로 복원할까요?\n현재 학기(${ACTIVE_SEM}학기) 데이터가 모두 백업 파일로 대체됩니다.`)) return;
-        // 복원 전: 드라이브 동기화 기준(base)도 복원 데이터로 맞춰줌
-        // → 재로드 후 동기화 시 "내가 바꾼 게 없다"고 판단해 클라우드가 덮어쓰지 않음
-        saveBase(data);
-        // 복원 데이터를 현재 학기 키에 저장
-        localStorage.setItem(dbKey(), JSON.stringify(data));
-        // 드라이브 fileId 캐시도 초기화 → 재로드 후 드라이브에서 먼저 가져와 비교
-        setFileId(null);
-        setRestoreStatus("✅ 복원 완료. 페이지를 새로고침합니다.");
-        setTimeout(()=>window.location.reload(), 1200);
+        if(!confirm(`백업 파일(${data._exported||"날짜미상"})으로 복원할까요?\n현재 데이터가 모두 백업 파일로 대체되며, 서버에도 그대로 저장됩니다.`)) return;
+        delete data._exported; delete data._version;
+        const restored=migrateDB(data);
+        // 앱 상태를 직접 교체 → 자동으로 로컬 저장 + 서버 push까지 이어짐 (서버 모드 호환)
+        update(d=>{ Object.keys(d).forEach(k=>{ delete d[k]; }); Object.assign(d, restored); });
+        setRestoreStatus("✅ 복원 완료. 잠시 후 서버에 자동 저장됩니다.");
       }catch(err){ setRestoreStatus("❌ 파일을 읽을 수 없습니다: "+err.message); }
     };
     reader.readAsText(file);
@@ -6213,7 +6308,132 @@ function ExamEditor({examId,db,update,onClose}){
 
 if(window.immer && window.immer.setAutoFreeze) window.immer.setAutoFreeze(false);
 applySemTheme();
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+/* ===================== 부팅 게이트 =====================
+ * 서버(SERVER.URL)가 설정된 경우: 접속 비밀번호 확인 → 서버 전체 DB 수신 → 그 데이터로 앱 시작.
+ * 서버가 비어 있으면(최초 1회): 이 기기의 로컬 데이터를 서버로 올려 이전(마이그레이션).
+ * 서버 미설정 시: 기존처럼 localStorage로 시작(개발·로컬 모드).
+ * 네트워크 장애 시: 명시적 선택으로만 로컬 캐시 진입 허용.
+ */
+function BootGate(){
+  const [phase,setPhase]=useState(()=> serverCfgOk() ? (getServerToken()? "loading":"login") : "localmode");
+  const [pw,setPw]=useState("");
+  const [err,setErr]=useState(null);
+  const [note,setNote]=useState(null);
+  const bootRef=useRef(null); // {db, rev, offline}
+
+  async function tryLoad(){
+    setPhase("loading"); setErr(null);
+    try{
+      setNote("서버에서 데이터를 불러오는 중…");
+      const res=await serverCall({action:"load"});
+      if(!res.ok){
+        if(res.code==="unauthorized"){ setServerToken(null); setErr("비밀번호가 올바르지 않습니다."); setPhase("login"); return; }
+        throw new Error(res.msg||res.code||"서버 오류");
+      }
+      if(res.empty){
+        // 서버가 비어 있음 → 이 기기의 데이터로 최초 업로드 (이전 마이그레이션)
+        const local=migrateDB(loadDB());
+        setNote("서버가 비어 있어 이 기기의 데이터를 서버로 올리는 중… (최초 1회)");
+        const up=await serverCall({action:"save", baseRev:res.rev, db:local});
+        if(!up.ok) throw new Error(up.msg||"최초 업로드 실패");
+        saveBase(local); saveDB(local);
+        bootRef.current={db:local, rev:up.rev, offline:false};
+      }else{
+        // 이 기기에 서버로 못 보낸 변경이 남아 있으면(캐시 ≠ 마지막 동기화 기준) 병합해서 시작
+        const cached=loadDB(), base=loadBase();
+        let db;
+        if(cached && base && JSON.stringify(cached)!==JSON.stringify(base)){
+          setNote("이 기기의 미전송 변경을 서버 데이터와 합치는 중…");
+          db=migrateDB(mergeDB(base, cached, res.db));
+        }else{
+          db=migrateDB(res.db);
+        }
+        saveBase(res.db);  // 3-way 병합 기준점 = 서버 원본
+        saveDB(db);        // 오프라인 캐시 갱신
+        bootRef.current={db, rev:res.rev, offline:false};
+      }
+      setPhase("ready");
+    }catch(e){
+      setErr(String(e&&e.message||e));
+      setPhase("error");
+    }
+  }
+
+  useEffect(()=>{ if(phase==="loading") tryLoad(); },[]);
+
+  function submitPw(){
+    const v=pw.trim();
+    if(!v){ setErr("비밀번호를 입력하세요."); return; }
+    setServerToken(v);
+    tryLoad();
+  }
+  function openOffline(){
+    const cached=loadDB();
+    if(!cached){ alert("이 기기에 저장된 캐시가 없습니다. 서버 연결이 필요합니다."); return; }
+    if(!confirm("오프라인 모드로 엽니다.\n\n· 이 기기에 마지막으로 저장된 데이터로 시작합니다.\n· 서버로 저장되지 않으며, 다른 기기와 동기화되지 않습니다.\n· 네트워크가 복구되면 앱을 새로고침해 서버 모드로 접속하세요.\n\n계속할까요?")) return;
+    bootRef.current={db:migrateDB(cached), rev:0, offline:true};
+    setPhase("ready");
+  }
+
+  if(phase==="localmode"){
+    // SERVER.URL 미설정: 기존 localStorage 동작 그대로
+    return <App initialDb={migrateDB(loadDB())} initialRev={0} offline={true}/>;
+  }
+  if(phase==="ready"){
+    const b=bootRef.current;
+    return <App initialDb={b.db} initialRev={b.rev} offline={b.offline}/>;
+  }
+
+  const box={maxWidth:400,margin:"18vh auto 0",padding:"36px 32px",background:"var(--paper,#fff)",border:"1px solid var(--line,#e3e0d8)",borderRadius:16,boxShadow:"0 8px 30px rgba(0,0,0,.08)",fontFamily:"inherit"};
+  return (
+    <div style={{minHeight:"100vh"}}>
+      <div style={box}>
+        <div style={{fontSize:22,marginBottom:4}}>📚 교과학습관리</div>
+        <div style={{fontSize:12.5,color:"#8a8577",marginBottom:22}}>풍덕고등학교 · 서버 동기화 모드</div>
+
+        {phase==="login" && (
+          <div>
+            <label style={{fontSize:13,fontWeight:600,display:"block",marginBottom:8}}>접속 비밀번호</label>
+            <input type="password" value={pw} autoFocus
+              onChange={e=>setPw(e.target.value)}
+              onKeyDown={e=>{ if(e.key==="Enter") submitPw(); }}
+              placeholder="서버 설정 시 정한 비밀번호"
+              style={{width:"100%",boxSizing:"border-box",padding:"11px 13px",fontSize:14,border:"1px solid #d8d4c8",borderRadius:9,marginBottom:14}}/>
+            <button onClick={submitPw}
+              style={{width:"100%",padding:"12px",fontSize:14.5,fontWeight:700,color:"#fff",background:"#2f6f5e",border:"none",borderRadius:9,cursor:"pointer"}}>
+              서버에 접속
+            </button>
+            {err && <p style={{marginTop:12,fontSize:12.5,color:"#a8392f"}}>⚠ {err}</p>}
+            <p style={{marginTop:16,fontSize:11.5,color:"#8a8577",lineHeight:1.6}}>이 앱은 학생 개인정보를 다룹니다. 비밀번호는 이 기기에 저장되어 다음부터 자동으로 접속합니다. 공용 컴퓨터에서는 사용 후 사이드바에서 로그아웃하세요.</p>
+          </div>
+        )}
+
+        {phase==="loading" && (
+          <div style={{textAlign:"center",padding:"14px 0 6px"}}>
+            <div style={{fontSize:30,animation:"pulse 1.2s infinite"}}>☁</div>
+            <p style={{fontSize:13.5,color:"#5c5850",marginTop:10}}>{note||"서버에서 데이터를 불러오는 중…"}</p>
+          </div>
+        )}
+
+        {phase==="error" && (
+          <div>
+            <p style={{fontSize:13.5,color:"#a8392f",lineHeight:1.6}}>⚠ 서버에 연결하지 못했습니다.<br/><span style={{fontSize:11.5,color:"#8a8577",wordBreak:"break-all"}}>{err}</span></p>
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:16}}>
+              <button onClick={tryLoad}
+                style={{padding:"11px",fontSize:14,fontWeight:700,color:"#fff",background:"#2f6f5e",border:"none",borderRadius:9,cursor:"pointer"}}>↻ 다시 시도</button>
+              <button onClick={openOffline}
+                style={{padding:"11px",fontSize:13,color:"#5c5850",background:"transparent",border:"1px solid #d8d4c8",borderRadius:9,cursor:"pointer"}}>오프라인(로컬 캐시)으로 열기</button>
+              <button onClick={()=>{ setServerToken(null); setPw(""); setErr(null); setPhase("login"); }}
+                style={{padding:"9px",fontSize:12,color:"#8a8577",background:"transparent",border:"none",cursor:"pointer"}}>다른 비밀번호로 접속</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<BootGate/>);
 </script>
 </body>
 </html>
